@@ -137,10 +137,18 @@ function extractStylingSignals(source) {
 
 function extractStringLiteralClasses(source) {
   const classes = [];
+  const stringLiteralPattern = new RegExp(STRING_LITERAL_PATTERN);
   let match;
 
-  while ((match = STRING_LITERAL_PATTERN.exec(source)) !== null) {
-    classes.push(...normalizeClasses(match[2] ?? ''));
+  while ((match = stringLiteralPattern.exec(source)) !== null) {
+    const quote = match[1];
+    const value = match[2] ?? '';
+    const before = source.slice(0, match.index).trimEnd();
+    if (/(?:[=!]==?|\bcase)$/.test(before)) {
+      // comparison operand or switch-case label (tone === "error"), not a class list
+      continue;
+    }
+    classes.push(...(quote === '`' ? extractTemplateLiteralClasses(value) : normalizeClasses(value)));
   }
 
   return classes;
