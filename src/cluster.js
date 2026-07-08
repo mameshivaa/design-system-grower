@@ -1,26 +1,25 @@
-const CATEGORY_PATTERNS = [
-  ['layout', /^(container|flex|grid|block|inline|hidden|contents|flow-|columns-|col-|row-|place-|items-|justify-|content-|self-|order-|basis-|grow|shrink)/],
-  ['spacing', /^(-?m[trblxy]?|-?p[trblxy]?|space-[xy]|gap[xy]?)-/],
-  ['sizing', /^(w|h|min-w|min-h|max-w|max-h|size)-/],
-  ['typography', /^(font|text|tracking|leading|list|placeholder|underline|no-underline|uppercase|lowercase|capitalize|normal-case|truncate|line-clamp)/],
-  ['color', /^(bg|text|border|ring|outline|divide|decoration|accent|caret|fill|stroke)-/],
-  ['border', /^(border|rounded|divide|ring|outline)-/],
-  ['effects', /^(shadow|opacity|mix-blend|blur|brightness|contrast|drop-shadow|grayscale|hue-rotate|invert|saturate|sepia|backdrop)-/],
-  ['position', /^(static|fixed|absolute|relative|sticky|inset|top|right|bottom|left|z)-/],
-  ['interaction', /^(cursor|select|pointer-events|resize|scroll|snap|touch|will-change|appearance)/],
-  ['animation', /^(animate|transition|duration|ease|delay|transform|translate|rotate|scale|skew|origin)-/],
-  ['accessibility', /^(sr-only|not-sr-only)/],
-];
+import {
+  classCategory,
+  classPrefix,
+  hasDistinctiveClassMix,
+  isIconElement,
+  isSizingOnlyClasses,
+  summarizeClassCategories,
+} from './class-analysis.js';
 
 export function clusterClassNameMatches(matches, options = {}) {
   const minimumOccurrences = options.minimumOccurrences ?? 2;
+  const classWeights = buildClassWeights(matches);
   const exactGroups = groupBySignature(matches);
   const exactClusters = [];
   const similarBuckets = new Map();
 
   for (const group of exactGroups.values()) {
     if (group.length >= minimumOccurrences) {
-      exactClusters.push(buildCluster('exact', group[0].signature, group));
+      const cluster = buildCluster('exact', group[0].signature, group, classWeights);
+      if (passesClusterQualityGate(cluster)) {
+        exactClusters.push(cluster);
+      }
       continue;
     }
 
@@ -34,7 +33,10 @@ export function clusterClassNameMatches(matches, options = {}) {
   const similarClusters = [];
   for (const [bucketKey, group] of similarBuckets) {
     if (group.length >= minimumOccurrences && hasMeaningfulOverlap(group)) {
-      similarClusters.push(buildCluster('similar', bucketKey, group));
+      const cluster = buildCluster('similar', bucketKey, group, classWeights);
+      if (passesClusterQualityGate(cluster)) {
+        similarClusters.push(cluster);
+      }
     }
   }
 
@@ -54,16 +56,21 @@ function groupBySignature(matches) {
   return groups;
 }
 
-function buildCluster(type, key, matches) {
+function buildCluster(type, key, matches, classWeights) {
   const uniqueFiles = new Set(matches.map((match) => match.file));
   const commonClasses = findCommonClasses(matches);
   const categories = summarizeCategories(matches);
+  const commonCategorySummary = summarizeClassCategories(commonClasses);
   const classTokenCount = matches.reduce((sum, match) => sum + match.classes.length, 0);
+  const commonWeight = commonClasses.reduce((sum, className) => sum + (classWeights.get(className) ?? 1), 0);
+  const variantClasses = findVariantClasses(matches, commonClasses);
+  const variantWeight = variantClasses.reduce((sum, className) => sum + (classWeights.get(className) ?? 1), 0);
   const score = Math.round(
-    matches.length * 8
-    + uniqueFiles.size * 6
-    + commonClasses.length * 3
-    + Math.min(classTokenCount, 40)
+    matches.length * 6
+    + uniqueFiles.size * 5
+    + commonWeight * 12
+    + Math.min(variantWeight * 2, 12)
+    + Math.min(classTokenCount, 24)
   );
 
   return {
@@ -73,8 +80,13 @@ function buildCluster(type, key, matches) {
     occurrences: matches.length,
     files: uniqueFiles.size,
     commonClasses,
-    variantClasses: findVariantClasses(matches, commonClasses),
+    variantClasses,
     categories,
+    quality: {
+      commonCategories: commonCategorySummary,
+      commonCategoryCount: commonCategorySummary.length,
+      weightedCommonClassScore: Number(commonWeight.toFixed(3)),
+    },
     examples: matches.map((match) => ({
       file: match.file,
       line: match.line,
@@ -93,7 +105,7 @@ function buildBucketKey(classes) {
 }
 
 function hasMeaningfulOverlap(matches) {
-  return findCommonClasses(matches).length > 0 || sharedPrefixCount(matches) >= 2;
+  return findCommonClasses(matches).length > 0 && sharedPrefixCount(matches) >= 2;
 }
 
 function sharedPrefixCount(matches) {
@@ -135,8 +147,9 @@ function summarizeCategories(matches) {
   const counts = new Map();
   for (const match of matches) {
     for (const className of match.classes) {
-      const category = classCategory(className);
-      counts.set(category, (counts.get(category) ?? 0) + 1);
+      for (const { name } of summarizeClassCategories([className])) {
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
     }
   }
 
@@ -145,24 +158,40 @@ function summarizeCategories(matches) {
     .map(([name, count]) => ({ name, count }));
 }
 
-export function classCategory(className) {
-  const normalized = stripVariant(className);
-  for (const [category, pattern] of CATEGORY_PATTERNS) {
-    if (pattern.test(normalized)) {
-      return category;
+function passesClusterQualityGate(cluster) {
+  if (cluster.commonClasses.length === 0) {
+    return false;
+  }
+
+  if (!hasDistinctiveClassMix(cluster.commonClasses)) {
+    return false;
+  }
+
+  if (
+    cluster.examples.length > 0
+    && cluster.examples.every((example) => isIconElement(example.element))
+    && isSizingOnlyClasses(cluster.commonClasses)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function buildClassWeights(matches) {
+  const total = Math.max(matches.length, 1);
+  const documentFrequency = new Map();
+
+  for (const match of matches) {
+    for (const className of new Set(match.classes)) {
+      documentFrequency.set(className, (documentFrequency.get(className) ?? 0) + 1);
     }
   }
-  return 'other';
+
+  return new Map([...documentFrequency.entries()].map(([className, count]) => {
+    const idf = Math.log((1 + total) / (1 + count)) + 1;
+    return [className, idf];
+  }));
 }
 
-function classPrefix(className) {
-  const normalized = stripVariant(className);
-  const bracketIndex = normalized.indexOf('[');
-  const safe = bracketIndex === -1 ? normalized : normalized.slice(0, bracketIndex);
-  return safe.split('-')[0] || safe;
-}
-
-function stripVariant(className) {
-  const parts = className.split(':');
-  return parts[parts.length - 1];
-}
+export { classCategory } from './class-analysis.js';

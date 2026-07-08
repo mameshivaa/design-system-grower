@@ -1,6 +1,10 @@
+import { hasDistinctiveClassMix } from './class-analysis.js';
+
 export function buildCandidates(clusters, situations = []) {
   const situationIds = new Set(situations.map((situation) => situation.id));
-  const clusterCandidates = clusters.map((cluster, index) => buildClusterCandidate(cluster, index, situationIds));
+  const clusterCandidates = clusters
+    .filter((cluster) => cluster.commonClasses.length > 0 && hasDistinctiveClassMix(cluster.commonClasses))
+    .map((cluster, index) => buildClusterCandidate(cluster, index, situationIds));
   const observeOnlyCandidates = buildObserveOnlyCandidates(situations, clusterCandidates.length);
 
   return [...clusterCandidates, ...observeOnlyCandidates];
