@@ -131,10 +131,13 @@ export function extractJsxElementAt(source, location) {
 
 function buildComponentSource({ asset, componentName, extraction, sourceLocation, variantResult }) {
   const hasPlainChildren = !extraction.selfClosing && hasPlainTextChildren(extraction.jsx);
+  const canPropsify = extraction.selfClosing || hasPlainChildren;
+  const hasNestedJsx = !canPropsify;
   const props = [];
   let jsx = extraction.jsx;
   const declarations = [];
   const comments = [];
+  let usesRestProps = false;
 
   if (variantResult?.variants) {
     props.push("variant = 'default'");
@@ -150,7 +153,16 @@ function buildComponentSource({ asset, componentName, extraction, sourceLocation
     jsx = replacePlainTextChildren(jsx, '{children}');
   }
 
-  const signature = props.length > 0 ? `{ ${props.join(', ')} } = {}` : '';
+  if (canPropsify) {
+    const propsified = propsifySimpleRootElement(jsx);
+    jsx = propsified.jsx;
+    usesRestProps = propsified.usesRestProps;
+  }
+
+  jsx = normalizeJsxIndent(jsx);
+
+  const unresolvedIdentifiers = hasNestedJsx ? collectUnresolvedJsxIdentifiers(extraction.jsx) : [];
+  const signature = buildFunctionSignature({ props, usesRestProps });
   const lines = [
     `// Extracted from ${sourceLocation.file}:${sourceLocation.line} by design-system-grower`,
     ...comments,
@@ -161,10 +173,257 @@ function buildComponentSource({ asset, componentName, extraction, sourceLocation
     indentLines(jsx, 4),
     '  );',
     '}',
+    unresolvedIdentifiers.length > 0 ? `// TODO: unresolved identifiers: ${unresolvedIdentifiers.join(', ')}` : null,
     '',
   ].filter((line) => line !== null);
 
   return lines.join('\n');
+}
+
+function buildFunctionSignature({ props, usesRestProps }) {
+  if (props.length > 0 && usesRestProps) {
+    return `{ ${props.join(', ')}, ...props } = {}`;
+  }
+  if (props.length > 0) {
+    return `{ ${props.join(', ')} } = {}`;
+  }
+  return usesRestProps ? 'props' : '';
+}
+
+function propsifySimpleRootElement(jsx) {
+  const tag = readTag(jsx, 0);
+  if (!tag || tag.closing || !tag.name) {
+    return { jsx, usesRestProps: false };
+  }
+
+  const attributes = readRootAttributes(jsx, tag);
+  const expressionAttributes = attributes.filter((attribute) => attribute.name !== 'className' && attribute.valueType === 'expression');
+  if (expressionAttributes.length === 0) {
+    return { jsx, usesRestProps: false };
+  }
+
+  const keptAttributes = attributes
+    .filter((attribute) => attribute.name === 'className' || attribute.valueType !== 'expression')
+    .map((attribute) => attribute.raw);
+  const rebuilt = rebuildRootElement({
+    name: tag.name,
+    attributes: [...keptAttributes, '{...props}'],
+    selfClosing: tag.selfClosing,
+    children: tag.selfClosing ? '' : getElementChildren(jsx),
+  });
+
+  return { jsx: rebuilt, usesRestProps: true };
+}
+
+function readRootAttributes(jsx, tag) {
+  const attrStart = 1 + tag.name.length;
+  let attrEnd = tag.end - 1;
+  if (tag.selfClosing) {
+    attrEnd -= 1;
+  }
+  const attributeText = jsx.slice(attrStart, attrEnd);
+  return splitAttributeTokens(attributeText).map((raw) => {
+    const nameMatch = raw.match(/^([A-Za-z_$][A-Za-z0-9_$:.-]*)(?:\s*=)?/);
+    const name = nameMatch?.[1] ?? raw;
+    const afterName = raw.slice(name.length).trimStart();
+    let valueType = 'boolean';
+    if (raw.startsWith('{')) {
+      valueType = 'expression';
+    } else if (afterName.startsWith('=')) {
+      const value = afterName.slice(1).trimStart();
+      valueType = value.startsWith('{') ? 'expression' : 'literal';
+    }
+    return { name, raw, valueType };
+  });
+}
+
+function splitAttributeTokens(attributeText) {
+  const tokens = [];
+  let start = -1;
+  let quote = null;
+  let braceDepth = 0;
+  for (let index = 0; index < attributeText.length; index += 1) {
+    const char = attributeText[index];
+    const prev = attributeText[index - 1];
+    if (start < 0) {
+      if (/\s/.test(char)) {
+        continue;
+      }
+      start = index;
+    }
+    if (quote) {
+      if (char === quote && prev !== '\\') {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '{') {
+      braceDepth += 1;
+      continue;
+    }
+    if (char === '}') {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+    if (/\s/.test(char) && braceDepth === 0) {
+      tokens.push(attributeText.slice(start, index).trim());
+      start = -1;
+    }
+  }
+  if (start >= 0) {
+    tokens.push(attributeText.slice(start).trim());
+  }
+  return tokens.filter(Boolean);
+}
+
+function rebuildRootElement({ name, attributes, selfClosing, children }) {
+  if (attributes.length === 0) {
+    return selfClosing ? `<${name} />` : `<${name}>${children}</${name}>`;
+  }
+  const opening = [
+    `<${name}`,
+    ...attributes.map((attribute) => `  ${attribute}`),
+    selfClosing ? '/>' : '>',
+  ].join('\n');
+  if (selfClosing) {
+    return opening;
+  }
+  return `${opening}\n  ${children}\n</${name}>`;
+}
+
+function getElementChildren(jsx) {
+  const openingEnd = findOpeningTagEnd(jsx, 0);
+  const closingStart = jsx.lastIndexOf('</');
+  if (openingEnd < 0 || closingStart < openingEnd) {
+    return '';
+  }
+  return jsx.slice(openingEnd, closingStart).trim();
+}
+
+function normalizeJsxIndent(jsx) {
+  const lines = jsx.replace(/^\n+|\n+$/g, '').split('\n');
+  const nonEmpty = lines.filter((line) => line.trim().length > 0);
+  const minIndent = Math.min(
+    ...nonEmpty
+      .filter((line) => line.startsWith(' '))
+      .map((line) => line.match(/^ */)[0].length),
+    Infinity,
+  );
+  if (!Number.isFinite(minIndent) || minIndent <= 2) {
+    return lines.join('\n');
+  }
+  return lines.map((line) => line.startsWith(' '.repeat(minIndent)) ? line.slice(minIndent) : line).join('\n');
+}
+
+function collectUnresolvedJsxIdentifiers(jsx) {
+  const globals = new Set([
+    'Array',
+    'Boolean',
+    'Date',
+    'Error',
+    'JSON',
+    'Math',
+    'Number',
+    'Object',
+    'Promise',
+    'React',
+    'String',
+    'console',
+    'document',
+    'event',
+    'false',
+    'globalThis',
+    'null',
+    'true',
+    'undefined',
+    'window',
+  ]);
+  const keywords = new Set([
+    'as',
+    'await',
+    'break',
+    'case',
+    'catch',
+    'const',
+    'continue',
+    'default',
+    'delete',
+    'do',
+    'else',
+    'export',
+    'finally',
+    'for',
+    'from',
+    'function',
+    'if',
+    'import',
+    'in',
+    'instanceof',
+    'let',
+    'new',
+    'of',
+    'return',
+    'switch',
+    'throw',
+    'try',
+    'typeof',
+    'var',
+    'void',
+    'while',
+    'yield',
+  ]);
+  const identifiers = new Set();
+  for (const expression of extractJsxExpressionContents(jsx)) {
+    for (const match of expression.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g)) {
+      const identifier = match[0];
+      const previous = expression[match.index - 1];
+      if (previous === '.' || globals.has(identifier) || keywords.has(identifier)) {
+        continue;
+      }
+      identifiers.add(identifier);
+    }
+  }
+  return [...identifiers].sort();
+}
+
+function extractJsxExpressionContents(jsx) {
+  const expressions = [];
+  let quote = null;
+  let expressionStart = -1;
+  let braceDepth = 0;
+  for (let index = 0; index < jsx.length; index += 1) {
+    const char = jsx[index];
+    const prev = jsx[index - 1];
+    if (quote) {
+      if (char === quote && prev !== '\\') {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '{') {
+      if (braceDepth === 0) {
+        expressionStart = index + 1;
+      }
+      braceDepth += 1;
+      continue;
+    }
+    if (char === '}' && braceDepth > 0) {
+      braceDepth -= 1;
+      if (braceDepth === 0 && expressionStart >= 0) {
+        expressions.push(jsx.slice(expressionStart, index));
+        expressionStart = -1;
+      }
+    }
+  }
+  return expressions;
 }
 
 async function buildVariantResult({ asset, repoRoot, representative }) {
