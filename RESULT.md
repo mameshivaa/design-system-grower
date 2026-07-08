@@ -1,21 +1,8 @@
-# 作業報告
+実装完了し、コミットしました。
 
-## 実装内容
+- Commit: `417a3db Implement new variant check`
+- 実装: `--base`、`new-variant`、candidate 照合、report 集計、strict 対応
+- テスト: `npm test` で 36 件全通過
+- 作業報告: `RESULT.md` に記録済み
 
-- `dsg check --base <git-ref>` を追加し、git 管理下では `<ref>...HEAD` と未コミット変更の JSX/TSX/JS/TS ファイルだけを検査対象にしました。
-- `catalog.json` の未承認 `candidates` も照合し、承認済み asset と完全一致せず、既存 candidate と Jaccard 0.5〜0.95 の範囲にある使用を `new-variant` として報告するようにしました。
-- `role` がある candidate は role を使い、ない場合は candidate の要素タグへ fallback する前方互換の実装にしました。
-- `near-miss` / `deprecated` が同じ箇所に該当する場合は既存違反を優先し、`new-variant` は報告しないようにしました。
-- markdown report に違反タイプ別の集計を追加し、`--strict` は `new-variant` でも失敗終了します。
-
-## テスト
-
-- `npm test`
-- 36 tests passed
-
-## 変更ファイル
-
-- `src/check.js`
-- `src/cli.js`
-- `test/design-system-grower.test.js`
-- `RESULT.md`
+補足: 開始時点から未追跡だった `TASK.md` はコミット対象に入れていません。
