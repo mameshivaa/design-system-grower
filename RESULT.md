@@ -1,19 +1,19 @@
-# role-taxonomy result
+実装完了してコミットしました。
 
-## Implemented
-- Added `src/roles.js` with `classifyRole`, role summary aggregation, and CLI summary line formatting.
-- Added `role` to all generated candidates, including canonicalize/drift and observe-only candidates.
-- Added `catalog.summary.roles` as `{ variants, competingFamilies, topExample }` per role.
-- Added role summary lines to `dsg scan` and `dsg init`, excluding `Other` and `Layout`.
-- Added role badges and role-first grouping to the review board, including the client-side Show all renderer.
-- Exported role helpers from `src/index.js`.
+変更内容:
+- `src/roles.js` を追加し、`classifyRole` と role summary 集計を実装
+- `candidates.json` 各 candidate に `role` を追加
+- `catalog.summary.roles` を追加
+- `dsg scan` / `dsg init` の出力に `Button: 4 variants (2 competing families)` 形式の role 行を追加
+- review board に role バッジと role-first grouping を追加
+- `RESULT.md` に作業報告を記録
 
-## Tests
-- Added fixtures for Button/FormField/Alert/Badge classification.
-- Added catalog summary role aggregation coverage.
-- Added scan/init stdout assertions for role summary lines.
-- Ran `npm test`: 34/34 passing.
+検証:
+- `npm test` 実行済み
+- 34/34 passing
+- `git diff --check` 問題なし
 
-## Notes
-- Did not modify `README.md`, `src/check.js`, or `src/hooks.js`.
-- No external runtime dependencies were added.
+コミット:
+- `8861773 Implement role taxonomy summaries`
+
+補足: `TASK.md` は作業開始前から未追跡だった入力ファイルなので、コミット対象には含めていません。
