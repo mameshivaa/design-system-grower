@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.6.0 (2026-07-09)
+
+Theme: package your work, then distribute it (lift, don't synthesize).
+
+### `dsg extract`
+
+- Lifts an approved asset's **actual source** into a component file: your classes and string-literal attributes intact, dynamic bindings replaced by `{...props}`, plain-text children promoted to `children`. Nested structures are lifted verbatim with unresolved identifiers listed in a TODO comment — no invented abstractions.
+- Self-verifies class equivalence with the original usage and fails rather than emit a mismatch.
+- Records provenance (source file/line, extraction time, git commit) in `design-system/provenance.json`; multi-line JSX openings resolve correctly and sources are read from `catalog.target`.
+
+### `dsg registry`
+
+- Packages provenanced components into a shadcn-compatible registry (`registry.json` + `r/<name>.json` with embedded content and provenance meta). Components without provenance are never published.
+- Verified end-to-end on a real production app: scan → approve → extract → registry → `npx shadcn@latest add` installed the component into a separate project.
+
 ## v0.5.0 (2026-07-08)
 
 ### `--blame` attribution

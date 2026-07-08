@@ -6,7 +6,7 @@
 
 自分のコードから自分の design system を育てるツール。
 
-**Grow your own design system from the UI you already shipped — and make AI coding agents follow it.**
+**Grow your own design system from the UI you already shipped — package your hand-crafted components for distribution, and make AI coding agents follow them.**
 
 ## The problem
 
@@ -61,6 +61,23 @@ dsg check . --design-system design-system --report drift.md
 ```
 
 See [docs/check.md](docs/check.md) for CI integration examples.
+
+## Package your work, then distribute it
+
+Your hand-written UI is the asset — the tool wraps it, it never regenerates it (*lift, don't synthesize*):
+
+```bash
+dsg extract design-system asset-001 --out components/ui
+dsg registry design-system --components components/ui --out public/registry --name my-ui
+```
+
+`extract` lifts the approved pattern's **actual source** into a compilable component (your classes and literal attributes intact, dynamic bindings passed through as `{...props}`), records provenance (source file, line, commit), and refuses to emit anything whose classes don't match the original exactly. `registry` packages provenanced components into a **shadcn-compatible registry**, so anyone can install your work:
+
+```bash
+npx shadcn@latest add https://your-host/registry/r/app-textarea.json
+```
+
+Verified end-to-end on a real production app: scan → approve → extract → registry → `shadcn add` into a separate project. See [docs/registry.md](docs/registry.md).
 
 ## Two layers of agent guidance
 

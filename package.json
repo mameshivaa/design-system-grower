@@ -1,6 +1,6 @@
 {
   "name": "design-system-grower",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Repo-first CLI for finding repeated UI patterns and growing a project-specific design system.",
   "type": "module",
   "bin": {
