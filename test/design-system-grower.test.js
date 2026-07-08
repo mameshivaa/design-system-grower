@@ -173,6 +173,68 @@ test('buildCatalog detects shadcn, cva, library customization, and legacy stylin
   assert.ok(catalog.candidates.some((candidate) => candidate.actionType === 'unsupported'));
 });
 
+test('buildCatalog filters low-signal clusters and ranks repeated button patterns', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'components/ui/button.tsx': `
+      import { cva } from "class-variance-authority";
+      export const buttonVariants = cva("inline-flex items-center rounded-md px-4 py-2 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90");
+      export function Button(props) {
+        return <button className="inline-flex items-center rounded-md px-4 py-2 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90" {...props} />;
+      }
+      export function IconButton(props) {
+        return <button className="inline-flex items-center rounded-md px-2 py-2 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90" {...props} />;
+      }
+    `,
+    'src/variants.tsx': `
+      export const localCard = cva("rounded border bg-white p-4 text-sm shadow-sm hover:bg-zinc-50");
+      export function LocalCard() {
+        return <>
+          <section className="rounded border bg-white p-4 text-sm shadow-sm hover:bg-zinc-50">A</section>
+          <article className="rounded border bg-white p-4 text-sm shadow-sm hover:bg-zinc-50">B</article>
+        </>;
+      }
+    `,
+    'src/Noise.tsx': `
+      import { Icons } from "./icons";
+      export function Noise() {
+        return <>
+          <div className="flex gap-2 items-center">One</div>
+          <div className="flex gap-2 items-center">Two</div>
+          <section className="mt-8">A</section>
+          <aside className="mt-8">B</aside>
+          <Icons.plus className="h-4 w-4" />
+          <Icons.minus className="h-4 w-4" />
+        </>;
+      }
+    `,
+    'src/Actions.tsx': `
+      export function Actions() {
+        return <>
+          <button className="inline-flex items-center rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">Save</button>
+          <a className="inline-flex items-center rounded-md px-4 py-2 text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700">Docs</a>
+          <button className="inline-flex items-center rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">Continue</button>
+        </>;
+      }
+    `,
+  });
+
+  const catalog = await buildCatalog(fixtureDir);
+  const topCandidate = catalog.candidates[0];
+  const candidateClassSets = catalog.candidates.map((candidate) => candidate.commonClasses.join(' '));
+  const candidateFiles = catalog.candidates.flatMap((candidate) => candidate.source.examples.map((example) => example.file));
+
+  assert.ok(topCandidate.commonClasses.includes('rounded-md'));
+  assert.ok(topCandidate.commonClasses.includes('px-4'));
+  assert.ok(topCandidate.commonClasses.includes('text-sm'));
+  assert.ok(topCandidate.commonClasses.includes('text-white'));
+  assert.ok(topCandidate.commonClasses.some((className) => className.startsWith('hover:')));
+  assert.doesNotMatch(candidateClassSets.join('\n'), /flex gap-2 items-center|mt-8|h-4 w-4/);
+  assert.ok(catalog.candidates.every((candidate) => candidate.commonClasses.length > 0));
+  assert.ok(candidateFiles.every((file) => !file.startsWith('components/ui/') && file !== 'src/variants.tsx'));
+  assert.ok(catalog.inventory.existingDesignSystem.files.includes('components/ui/button.tsx'));
+  assert.ok(catalog.inventory.existingDesignSystem.files.includes('src/variants.tsx'));
+});
+
 test('buildCatalog does not require shadcn to produce reusable UI candidates', async () => {
   const fixtureDir = await makeFixtureRepo({
     'src/Marketing.tsx': `

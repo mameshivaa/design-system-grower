@@ -10,7 +10,7 @@ import {
   buildReviewHtml,
 } from './decisions.js';
 import { analyzeSource } from './extractor.js';
-import { buildInventory } from './inventory.js';
+import { buildInventory, isExistingDesignSystemSource } from './inventory.js';
 import { findJsxFiles } from './scanner.js';
 import { diagnoseSituations } from './situations.js';
 
@@ -25,7 +25,8 @@ export async function buildCatalog(targetDir, options = {}) {
     analyses.push(analyzeSource(source, relativeFile));
   }
 
-  const elements = analyses.flatMap((analysis) => [
+  const candidateAnalyses = analyses.filter((analysis) => !isExistingDesignSystemSource(analysis));
+  const elements = candidateAnalyses.flatMap((analysis) => [
     ...analysis.classNameMatches.map((match) => ({ ...match, sourceType: 'className' })),
     ...analysis.cnCalls.map((call) => ({
       file: call.file,

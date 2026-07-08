@@ -13,6 +13,7 @@ export function buildInventory(analyses) {
   const libraryCounts = countLibraries(analyses);
   const shadcnComponents = findShadcnComponents(analyses);
   const cvaDefinitions = analyses.flatMap((analysis) => analysis.cvaDefinitions);
+  const cvaDefinitionFiles = findCvaDefinitionFiles(analyses);
   const cnCalls = analyses.flatMap((analysis) => analysis.cnCalls);
   const classNameMatches = analyses.flatMap((analysis) => analysis.classNameMatches);
   const stylingSignals = summarizeStylingSignals(analyses);
@@ -33,6 +34,12 @@ export function buildInventory(analyses) {
       componentFiles: shadcnComponents,
       cvaDefinitions,
     },
+    existingDesignSystem: {
+      files: [...new Set([...shadcnComponents, ...cvaDefinitionFiles])].sort(),
+      componentFiles: shadcnComponents,
+      cvaDefinitionFiles,
+      cvaDefinitions,
+    },
     classComposition: {
       cnCalls,
       cvaDefinitions,
@@ -45,6 +52,7 @@ export function buildInventory(analyses) {
       componentClassNameMatches: componentClassNameMatches.length,
       cnCalls: cnCalls.length,
       cvaDefinitions: cvaDefinitions.length,
+      existingDesignSystemFiles: new Set([...shadcnComponents, ...cvaDefinitionFiles]).size,
       cssModuleFiles: stylingSignals.cssModuleFiles.length,
       styledComponentFiles: stylingSignals.styledComponentFiles.length,
       sxPropFiles: stylingSignals.sxPropFiles.length,
@@ -85,9 +93,24 @@ function countLibraries(analyses) {
 
 function findShadcnComponents(analyses) {
   return analyses
-    .filter((analysis) => /(^|\/)components\/ui\/[^/]+\.[jt]sx?$/.test(analysis.file))
+    .filter((analysis) => isComponentsUiFile(analysis.file))
     .map((analysis) => analysis.file)
     .sort();
+}
+
+function findCvaDefinitionFiles(analyses) {
+  return analyses
+    .filter((analysis) => analysis.cvaDefinitions.length > 0)
+    .map((analysis) => analysis.file)
+    .sort();
+}
+
+export function isExistingDesignSystemSource(analysis) {
+  return isComponentsUiFile(analysis.file) || analysis.cvaDefinitions.length > 0;
+}
+
+function isComponentsUiFile(filePath) {
+  return /(^|\/)components\/ui\/.*\.[jt]sx?$/.test(filePath);
 }
 
 function summarizeStylingSignals(analyses) {
