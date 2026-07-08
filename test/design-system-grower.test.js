@@ -420,6 +420,62 @@ test('buildCatalog does not require shadcn to produce reusable UI candidates', a
   assert.equal(catalog.candidates[0].actionType, 'promote-variant');
 });
 
+test('buildCatalog detects competing color families and canonicalize decisions deprecate the losing side', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/StatusNotices.tsx': `
+      export function StatusNotices() {
+        return <>
+          <div className="rounded-md border px-3 py-2 text-sm bg-emerald-50 border-emerald-200 text-emerald-900">Ready</div>
+          <div className="rounded-md border px-3 py-2 text-sm bg-emerald-50 border-emerald-200 text-emerald-900">Synced</div>
+          <div className="rounded-md border px-3 py-2 text-sm bg-emerald-50 border-emerald-200 text-emerald-900">Active</div>
+          <div className="rounded-md border px-3 py-2 text-sm bg-green-50 border-green-200 text-green-900">Legacy</div>
+        </>;
+      }
+    `,
+  });
+  const outputPath = path.join(fixtureDir, 'design-system', 'catalog.json');
+
+  await main([fixtureDir, '--out', outputPath], {
+    stdout: { write: () => {} },
+  });
+
+  const catalog = JSON.parse(await fs.readFile(outputPath, 'utf8'));
+  const driftCandidates = catalog.candidates.filter((candidate) => candidate.actionType === 'canonicalize');
+  const driftCandidate = driftCandidates[0];
+
+  assert.equal(driftCandidates.length, 1);
+  assert.equal(driftCandidate.recommendedSide, 1);
+  assert.equal(driftCandidate.sides[0].occurrences, 3);
+  assert.ok(driftCandidate.sides[0].classes.includes('bg-emerald-50'));
+  assert.ok(driftCandidate.sides[1].classes.includes('bg-green-50'));
+
+  await main([
+    'decide',
+    path.join(fixtureDir, 'design-system'),
+    driftCandidate.id,
+    'canonicalize',
+    '--name',
+    'StatusNotice',
+    '--side',
+    String(driftCandidate.recommendedSide),
+  ], {
+    stdout: { write: () => {} },
+  });
+
+  const decisions = JSON.parse(await fs.readFile(path.join(fixtureDir, 'design-system', 'decisions.json'), 'utf8'));
+  const assets = JSON.parse(await fs.readFile(path.join(fixtureDir, 'design-system', 'assets.json'), 'utf8'));
+  const agentRules = await fs.readFile(path.join(fixtureDir, 'design-system', 'agent-rules.md'), 'utf8');
+  const approved = decisions.find((decision) => decision.candidateId === driftCandidate.id);
+
+  assert.equal(approved.userDecision, 'canonicalize');
+  assert.equal(approved.canonicalSide.side, 1);
+  assert.ok(approved.canonicalClasses.includes('bg-emerald-50'));
+  assert.ok(approved.deprecatedClasses.includes('bg-green-50'));
+  assert.ok(assets.find((asset) => asset.candidateId === driftCandidate.id).deprecatedClasses.includes('bg-green-50'));
+  assert.match(agentRules, /Use StatusNotice \(.*bg-emerald-50/);
+  assert.match(agentRules, /The .*bg-green-50.* family is deprecated — do not use it in new code/);
+});
+
 test('buildCatalog recommends wrappers for repeated component overrides', async () => {
   const fixtureDir = await makeFixtureRepo({
     'src/Cards.tsx': `
@@ -863,6 +919,14 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     candidateId: 'candidate-001',
     userDecision: 'wrap',
     assetName: 'SurfaceCard',
+  });
+  assert.deepEqual(parseArgs(['decide', 'design-system', 'candidate-002', 'canonicalize', '--name', 'StatusNotice', '--side', '1']), {
+    command: 'decide',
+    target: 'design-system',
+    candidateId: 'candidate-002',
+    userDecision: 'canonicalize',
+    assetName: 'StatusNotice',
+    side: 1,
   });
   assert.deepEqual(parseArgs([
     'install-instructions',

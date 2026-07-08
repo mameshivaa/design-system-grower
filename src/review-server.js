@@ -164,6 +164,7 @@ async function serveDecide(artifactsDir, request, response) {
     candidateId: String(body.candidateId),
     decision: String(body.decision),
     assetName: body.assetName ? String(body.assetName) : undefined,
+    side: body.side === undefined ? undefined : Number(body.side),
   });
   sendJson(response, 200, { decision });
 }

@@ -1,13 +1,16 @@
 import { hasDistinctiveClassMix } from './class-analysis.js';
 
-export function buildCandidates(clusters, situations = []) {
+export function buildCandidates(clusters, situations = [], competingFamilies = []) {
   const situationIds = new Set(situations.map((situation) => situation.id));
   const clusterCandidates = clusters
     .filter((cluster) => cluster.commonClasses.length > 0 && hasDistinctiveClassMix(cluster.commonClasses))
     .map((cluster, index) => buildClusterCandidate(cluster, index, situationIds));
-  const observeOnlyCandidates = buildObserveOnlyCandidates(situations, clusterCandidates.length);
+  const driftCandidates = competingFamilies.map((family, index) => (
+    buildDriftCandidate(family, clusterCandidates.length + index)
+  ));
+  const observeOnlyCandidates = buildObserveOnlyCandidates(situations, clusterCandidates.length + driftCandidates.length);
 
-  return [...clusterCandidates, ...observeOnlyCandidates];
+  return [...clusterCandidates, ...driftCandidates, ...observeOnlyCandidates];
 }
 
 function buildClusterCandidate(cluster, index, situationIds) {
@@ -68,6 +71,49 @@ function buildObserveOnlyCandidates(situations, offset) {
     }));
 }
 
+function buildDriftCandidate(family, index) {
+  const recommended = family.sides.find((side) => side.side === family.recommendedSide) ?? family.sides[0];
+  const deprecated = family.sides.find((side) => side.side !== family.recommendedSide) ?? family.sides[1];
+
+  return {
+    id: `candidate-${String(index + 1).padStart(3, '0')}`,
+    driftId: family.id,
+    title: `${family.elementTags.join(' / ')} competing family: canonicalize`,
+    assetNameSuggestion: suggestAssetNameFromElements(family.elementTags, 'canonicalize'),
+    actionType: 'canonicalize',
+    safetyLevel: 'safe',
+    status: 'needs-decision',
+    recommendedAction: 'canonicalize',
+    recommendedSide: family.recommendedSide,
+    rationale: rationaleFor('canonicalize'),
+    source: {
+      occurrences: family.occurrences,
+      files: family.files,
+      examples: family.examples,
+    },
+    sides: family.sides,
+    canonicalSideSuggestion: recommended ? {
+      side: recommended.side,
+      occurrences: recommended.occurrences,
+      classes: recommended.classes,
+    } : null,
+    deprecatedSideSuggestion: deprecated ? {
+      side: deprecated.side,
+      occurrences: deprecated.occurrences,
+      classes: deprecated.classes,
+    } : null,
+    commonClasses: family.commonClasses,
+    variantClasses: family.variantClasses,
+    categories: family.categories,
+    score: family.score,
+    drift: {
+      jaccard: family.jaccard,
+      colorDrift: family.colorDrift,
+      categorySignature: family.categorySignature,
+    },
+  };
+}
+
 function inferActionType(cluster, situationIds) {
   if (cluster.examples.some((example) => /^[A-Z]/.test(example.element) && !isGenericComponentName(example.element))) {
     return 'extract-block';
@@ -108,6 +154,10 @@ function candidateTitle(cluster, actionType) {
 
 function suggestAssetName(cluster, actionType) {
   const elements = [...new Set(cluster.examples.map((example) => example.element))].sort();
+  return suggestAssetNameFromElements(elements, actionType);
+}
+
+function suggestAssetNameFromElements(elements, actionType) {
   const subject = inferSubject(elements);
   const suffix = suffixForAction(actionType);
   return `${subject}${suffix}`;
@@ -147,6 +197,8 @@ function suffixForAction(actionType) {
       return 'Rule';
     case 'unsupported':
       return 'Signal';
+    case 'canonicalize':
+      return 'Canonical';
     case 'reuse':
     default:
       return 'Pattern';
@@ -175,6 +227,8 @@ function rationaleFor(actionType) {
       return 'Similar code exists, but the safest first step is to document a usage rule instead of changing code.';
     case 'unsupported':
       return 'This signal is intentionally observe-only in the MVP and should not trigger code changes.';
+    case 'canonicalize':
+      return 'Competing class families serve the same role; choose one canonical family and deprecate the other for new code.';
     case 'reuse':
     default:
       return 'Repeated structure can likely reuse an existing component or variant after human review.';
