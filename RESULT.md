@@ -1,19 +1,16 @@
-# RESULT
+実装完了し、コミットしました。
 
-## 実装内容
+コミット: `cc66d3b Implement Claude hook installer`
 
-- `src/hooks.js` を追加し、Claude Code `PostToolUse` 用の `hook-check` と `.claude/settings.json` へ追記する `install-hooks` を実装。
-- `src/cli.js` に `hook-check` / `install-hooks` のコマンド登録と最小限の引数パースを追加。
-- `docs/hooks.md` を追加し、仕組み、インストール、アンインストール手順を記載。
-- `package.json` の npm 同梱ファイルに `docs/hooks.md` を追加。
-- `test/design-system-grower.test.js` に hook-check / install-hooks の要求ケースを追加。
+対応内容:
+- `src/hooks.js` 追加: `hook-check` / `install-hooks`
+- `src/cli.js` にコマンド登録
+- `docs/hooks.md` 追加
+- hook-check / install-hooks の要求テスト追加
+- `RESULT.md` に作業報告を記録
 
-## 確認
-
-- `npm test`
+確認:
+- `npm test` 実行済み
 - 38 tests / 38 pass
 
-## 備考
-
-- `src/check.js` の判定挙動は変更していない。
-- `src/roles.js` / `src/catalog.js` / `src/candidates.js` / `src/init.js` / `README.md` は変更していない。
+作業ツリーは `TASK.md` だけ未追跡のままです。これは開始時点からの入力ファイルなのでコミット対象から外しました。
