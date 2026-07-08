@@ -13,6 +13,7 @@ export { extractJsxElementAt, runExtract } from './extract.js';
 export { buildInventory } from './inventory.js';
 export { classifyRole, roleSummaryLines, summarizeRoles } from './roles.js';
 export { runInit } from './init.js';
+export { buildRegistry, writeRegistry } from './registry.js';
 export { startReviewServer } from './review-server.js';
 export { findJsxFiles } from './scanner.js';
 export { diagnoseSituations } from './situations.js';

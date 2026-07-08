@@ -14,6 +14,7 @@ import {
   extractClassCompositionCalls,
   extractCvaDefinitions,
   extractJsxClassNames,
+  buildRegistry,
   runInit,
   startReviewServer,
 } from '../src/index.js';
@@ -1779,11 +1780,150 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     output: 'components/ui',
     force: true,
   });
+  assert.deepEqual(parseArgs([
+    'registry',
+    'design-system',
+    '--components',
+    'components/ui',
+    '--out',
+    'public',
+    '--name',
+    'acme-ui',
+    '--homepage',
+    'https://example.com',
+  ]), {
+    command: 'registry',
+    target: 'design-system',
+    components: 'components/ui',
+    output: 'public',
+    registryName: 'acme-ui',
+    homepage: 'https://example.com',
+  });
   assert.throws(() => parseArgs(['decide', 'design-system', 'candidate-001', 'bad-action']), /Unknown decision action/);
   assert.throws(() => parseArgs(['check', 'repo']), /--design-system/);
   assert.throws(() => parseArgs(['hook-check']), /--design-system/);
   assert.throws(() => parseArgs(['mcp']), /--design-system/);
   assert.throws(() => parseArgs(['extract', 'design-system']), /extract requires/);
+  assert.throws(() => parseArgs(['registry']), /registry requires/);
+});
+
+test('buildRegistry packages only provenanced components as shadcn registry items', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'components/ui/primary-button.tsx': 'export function PrimaryButton() {\n  return <button className="rounded px-3 py-2">Save</button>;\n}\n',
+    'components/ui/status-card.tsx': 'export function StatusCard() {\n  return <section className="rounded border p-4">Ready</section>;\n}\n',
+    'components/ui/no-provenance.tsx': 'export function NoProvenance() {\n  return <div />;\n}\n',
+    'design-system/assets.json': `${JSON.stringify([
+      {
+        id: 'asset-primary-button',
+        name: 'PrimaryButton',
+        status: 'approved',
+        usageGuidance: 'Use PrimaryButton for primary form actions.',
+      },
+      {
+        id: 'asset-status-card',
+        name: 'Status Card',
+        status: 'approved',
+        usageGuidance: 'Use Status Card for compact status summaries.',
+      },
+      {
+        id: 'asset-no-provenance',
+        name: 'NoProvenance',
+        status: 'approved',
+        usageGuidance: 'This component must not be distributed without provenance.',
+      },
+    ], null, 2)}\n`,
+    'design-system/provenance.json': `${JSON.stringify([
+      {
+        assetId: 'asset-primary-button',
+        componentPath: 'components/ui/primary-button.tsx',
+        sourceFile: 'src/App.tsx',
+        sourceLine: 12,
+        extractedAt: '2026-07-08T00:00:00.000Z',
+      },
+      {
+        assetId: 'asset-status-card',
+        componentPath: 'components/ui/status-card.tsx',
+        sourceFile: 'src/Dashboard.tsx',
+        sourceLine: 21,
+        extractedAt: '2026-07-08T00:00:00.000Z',
+      },
+    ], null, 2)}\n`,
+  });
+
+  const built = await buildRegistry({
+    designSystemDir: path.join(fixtureDir, 'design-system'),
+    componentsDir: path.join(fixtureDir, 'components', 'ui'),
+    name: 'fixture-ui',
+    homepage: 'https://example.com/fixture-ui',
+  });
+
+  assert.equal(built.registry.name, 'fixture-ui');
+  assert.equal(built.registry.homepage, 'https://example.com/fixture-ui');
+  assert.deepEqual(built.registry.items.map((item) => item.name), ['primary-button', 'status-card']);
+  assert.equal(built.registry.items[0].type, 'registry:component');
+  assert.equal(built.registry.items[0].title, 'PrimaryButton');
+  assert.equal(built.registry.items[0].description, 'Use PrimaryButton for primary form actions.');
+  assert.deepEqual(built.registry.items[0].files, [{
+    path: 'components/ui/primary-button.tsx',
+    type: 'registry:component',
+    target: 'components/ui/primary-button.tsx',
+  }]);
+  assert.equal(built.registry.items[0].meta.provenance.sourceFile, 'src/App.tsx');
+  assert.equal(built.items[0].files[0].content, await fs.readFile(path.join(fixtureDir, 'components/ui/primary-button.tsx'), 'utf8'));
+  assert.equal(built.items[1].files[0].content, await fs.readFile(path.join(fixtureDir, 'components/ui/status-card.tsx'), 'utf8'));
+  assert.equal(built.items.some((item) => item.name === 'no-provenance'), false);
+  assert.doesNotThrow(() => JSON.parse(JSON.stringify(built.registry)));
+  assert.doesNotThrow(() => JSON.parse(JSON.stringify(built.items[0])));
+});
+
+test('registry command writes valid registry.json and item payloads', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'components/ui/notice.tsx': 'export function Notice() {\n  return <p className="text-sm">Notice</p>;\n}\n',
+    'design-system/assets.json': `${JSON.stringify([
+      {
+        id: 'asset-notice',
+        name: 'Notice',
+        status: 'approved',
+        usageGuidance: 'Use Notice for short inline messages.',
+      },
+    ], null, 2)}\n`,
+    'design-system/provenance.json': `${JSON.stringify([
+      {
+        assetId: 'asset-notice',
+        componentPath: 'notice.tsx',
+        sourceFile: 'src/Notice.tsx',
+        sourceLine: 3,
+        extractedAt: '2026-07-08T00:00:00.000Z',
+      },
+    ], null, 2)}\n`,
+  });
+  const outDir = path.join(fixtureDir, 'public');
+
+  const exitCode = await main([
+    'registry',
+    path.join(fixtureDir, 'design-system'),
+    '--components',
+    path.join(fixtureDir, 'components', 'ui'),
+    '--out',
+    outDir,
+    '--name',
+    'fixture-registry',
+    '--homepage',
+    'https://example.com',
+  ], {
+    stdout: { write() {} },
+    stderr: { write() {} },
+  });
+
+  const registry = JSON.parse(await fs.readFile(path.join(outDir, 'registry.json'), 'utf8'));
+  const item = JSON.parse(await fs.readFile(path.join(outDir, 'r', 'notice.json'), 'utf8'));
+
+  assert.equal(exitCode, 0);
+  assert.equal(registry.name, 'fixture-registry');
+  assert.equal(registry.items.length, 1);
+  assert.equal(registry.items[0].files[0].path, 'notice.tsx');
+  assert.equal(item.name, 'notice');
+  assert.equal(item.files[0].content, await fs.readFile(path.join(fixtureDir, 'components/ui/notice.tsx'), 'utf8'));
 });
 
 test('package bin entry can invoke the CLI module', () => {

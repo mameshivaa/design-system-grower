@@ -9,6 +9,7 @@ import { buildDiagnosis, regenerateDiagnosis } from './diagnosis.js';
 import { runExtract } from './extract.js';
 import { installClaudeHooks, runHookCheck } from './hooks.js';
 import { runInit } from './init.js';
+import { writeRegistry } from './registry.js';
 import { startMcpServer } from './mcp-server.js';
 import { openReviewUrl, startReviewServer } from './review-server.js';
 import { roleSummaryLines } from './roles.js';
@@ -115,6 +116,19 @@ export async function main(argv = process.argv.slice(2), streams = process) {
     return 0;
   }
 
+  if (options.command === 'registry') {
+    const designSystemDir = path.resolve(options.target);
+    const result = await writeRegistry({
+      designSystemDir,
+      componentsDir: options.components,
+      outDir: options.output,
+      name: options.registryName,
+      homepage: options.homepage,
+    });
+    streams.stdout.write(`Wrote ${result.itemCount} registry items to ${result.registryPath}\n`);
+    return 0;
+  }
+
   if (options.command === 'review') {
     const artifactsDir = path.resolve(options.target ?? path.join(process.cwd(), 'design-system'));
     const review = await startReviewServer({
@@ -160,7 +174,7 @@ export async function main(argv = process.argv.slice(2), streams = process) {
 
 export function parseArgs(argv) {
   const options = {};
-  const knownCommands = new Set(['scan', 'init', 'diagnose', 'extract', 'instruct', 'decide', 'review', 'install-instructions', 'check', 'hook-check', 'install-hooks', 'mcp']);
+  const knownCommands = new Set(['scan', 'init', 'diagnose', 'extract', 'instruct', 'decide', 'review', 'install-instructions', 'check', 'hook-check', 'install-hooks', 'mcp', 'registry']);
   const command = knownCommands.has(argv[0]) ? argv[0] : 'scan';
   const args = knownCommands.has(argv[0]) ? argv.slice(1) : argv;
   options.command = command;
@@ -274,7 +288,23 @@ export function parseArgs(argv) {
     }
 
     if (arg === '--name') {
-      options.assetName = requireValue(args, index, arg);
+      if (command === 'registry') {
+        options.registryName = requireValue(args, index, arg);
+      } else {
+        options.assetName = requireValue(args, index, arg);
+      }
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--components') {
+      options.components = requireValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--homepage') {
+      options.homepage = requireValue(args, index, arg);
       index += 1;
       continue;
     }
@@ -321,7 +351,7 @@ export function parseArgs(argv) {
       throw new Error(`Unexpected argument: ${arg}`);
     }
 
-    if (command === 'install-instructions' || command === 'review' || command === 'check' || command === 'init' || command === 'diagnose') {
+    if (command === 'install-instructions' || command === 'review' || command === 'check' || command === 'init' || command === 'diagnose' || command === 'registry') {
       if (!options.target) {
         options.target = arg;
         continue;
@@ -369,6 +399,10 @@ export function parseArgs(argv) {
 
   if (command === 'mcp' && !options.designSystem) {
     throw new Error('mcp requires --design-system <artifacts-dir>');
+  }
+
+  if (command === 'registry' && !options.target) {
+    throw new Error('registry requires: <design-system-dir>');
   }
 
   return options;
@@ -442,6 +476,7 @@ export function helpText() {
     '  design-system-grower hook-check --design-system <artifacts-dir>',
     '  design-system-grower install-hooks [--design-system <artifacts-dir>] [--settings .claude/settings.json] [--force]',
     '  design-system-grower mcp --design-system <artifacts-dir>',
+    '  design-system-grower registry <design-system-dir> [--components <dir>] [--out <dir>] [--name <registry-name>] [--homepage <url>]',
     '  design-system-grower review [design-system-dir] [--port 4173] [--no-open]',
     '  design-system-grower install-instructions [design-system-dir] [--agents-out AGENTS.md] [--claude-out CLAUDE.md]',
     '  node src/cli.mjs init [target-dir] [--design-system <dir>] [--no-open]',
@@ -454,6 +489,7 @@ export function helpText() {
     '  node src/cli.mjs hook-check --design-system <artifacts-dir>',
     '  node src/cli.mjs install-hooks [--design-system <artifacts-dir>] [--settings .claude/settings.json] [--force]',
     '  node src/cli.mjs mcp --design-system <artifacts-dir>',
+    '  node src/cli.mjs registry <design-system-dir> [--components <dir>] [--out <dir>] [--name <registry-name>] [--homepage <url>]',
     '  node src/cli.mjs review [design-system-dir] [--no-open]',
     '  node src/cli.mjs install-instructions [design-system-dir] [--force]',
     '',
@@ -467,7 +503,9 @@ export function helpText() {
     '  --blame                    Annotate check findings with git blame attribution',
     '  --report <path>            Write a markdown check report',
     '  --settings <path>          Claude Code settings path (install-hooks)',
-    '  --name <AssetName>         Name the approved asset when using decide',
+    '  --name <AssetName>         Name the approved asset when using decide; registry name when using registry',
+    '  --components <dir>         Directory containing extracted components for registry',
+    '  --homepage <url>           Public homepage URL for registry metadata',
     '  --side <n>                 Canonical side number when approving a canonicalize decision',
     '  --host <host>              Host for the local review server (default: 127.0.0.1)',
     '  --port <port>              Port for the local review server (default: 4173, 0 for random)',
