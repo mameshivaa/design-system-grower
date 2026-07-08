@@ -23,7 +23,7 @@ export async function buildRegistry(options = {}) {
     const asset = assetsById.get(provenance.assetId);
     const assetName = asset?.name ?? provenance.assetId;
     const itemName = kebabCase(assetName);
-    const componentPath = await resolveComponentPath(provenance.componentPath, componentsDir);
+    const componentPath = await resolveComponentPath(provenance.componentPath, componentsDir, designSystemDir);
     const source = await fs.readFile(componentPath, 'utf8');
     const target = normalizeTargetPath(provenance.componentPath, componentPath, componentsDir);
     const file = {
@@ -99,10 +99,12 @@ function normalizeProvenance(provenance) {
   return [];
 }
 
-async function resolveComponentPath(componentPath, componentsDir) {
+async function resolveComponentPath(componentPath, componentsDir, designSystemDir) {
   const candidates = path.isAbsolute(componentPath)
     ? [componentPath]
     : [
+        // extract records componentPath relative to the artifacts dir.
+        ...(designSystemDir ? [path.resolve(designSystemDir, componentPath)] : []),
         path.resolve(path.dirname(path.dirname(componentsDir)), componentPath),
         path.resolve(process.cwd(), componentPath),
         path.resolve(componentsDir, componentPath),

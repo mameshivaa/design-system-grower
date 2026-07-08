@@ -1965,7 +1965,7 @@ test('extract lifts a simple div with provenance and equivalent class names', as
   assert.match(component, /\{children\}/);
   assert.equal(provenance.length, 1);
   assert.equal(provenance[0].assetId, 'asset-card');
-  assert.equal(provenance[0].componentPath, 'components/ui/surface-card.jsx');
+  assert.equal(provenance[0].componentPath, path.join('..', 'components/ui/surface-card.jsx'));
   assert.equal(provenance[0].sourceFile, 'src/Card.tsx');
   assert.equal(provenance[0].sourceLine, 2);
 });

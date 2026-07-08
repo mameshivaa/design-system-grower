@@ -54,7 +54,8 @@ export async function runExtract(options = {}) {
     designSystemDir,
     repoRoot,
     assetId: asset.id,
-    componentPath: path.relative(repoRoot, outputFile),
+    // Relative to the artifacts dir — that is the portable unit registry reads.
+    componentPath: path.relative(designSystemDir, outputFile),
     sourceFile: sourceLocation.file,
     sourceLine: sourceLocation.line,
   });
