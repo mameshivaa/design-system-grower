@@ -5,6 +5,7 @@ import { buildCatalog, writeCatalog, writeDesignSystemArtifacts } from './catalo
 import { runDesignSystemCheck } from './check.js';
 import { saveDecision, VALID_ACTIONS, writeAssetArtifacts } from './decision-actions.js';
 import { buildAgentRulesMarkdown } from './decisions.js';
+import { runInit } from './init.js';
 import { openReviewUrl, startReviewServer } from './review-server.js';
 
 export async function main(argv = process.argv.slice(2), streams = process) {
@@ -63,6 +64,10 @@ export async function main(argv = process.argv.slice(2), streams = process) {
     return result.exitCode;
   }
 
+  if (options.command === 'init') {
+    return runInit(options, streams);
+  }
+
   if (options.command === 'review') {
     const artifactsDir = path.resolve(options.target ?? path.join(process.cwd(), 'design-system'));
     const review = await startReviewServer({
@@ -102,7 +107,7 @@ export async function main(argv = process.argv.slice(2), streams = process) {
 
 export function parseArgs(argv) {
   const options = {};
-  const knownCommands = new Set(['scan', 'instruct', 'decide', 'review', 'install-instructions', 'check']);
+  const knownCommands = new Set(['scan', 'init', 'instruct', 'decide', 'review', 'install-instructions', 'check']);
   const command = knownCommands.has(argv[0]) ? argv[0] : 'scan';
   const args = knownCommands.has(argv[0]) ? argv.slice(1) : argv;
   options.command = command;
@@ -234,7 +239,7 @@ export function parseArgs(argv) {
       throw new Error(`Unexpected argument: ${arg}`);
     }
 
-    if (command === 'install-instructions' || command === 'review' || command === 'check') {
+    if (command === 'install-instructions' || command === 'review' || command === 'check' || command === 'init') {
       if (!options.target) {
         options.target = arg;
         continue;
@@ -327,12 +332,14 @@ export function helpText() {
     'design-system-grower',
     '',
     'Usage:',
+    '  design-system-grower init [target-dir] [--design-system <dir>] [--port 4173] [--no-open]',
     '  design-system-grower scan [target-dir] --out catalog.json',
     '  design-system-grower instruct [design-system-dir]',
     '  design-system-grower decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--strict] [--report out.md]',
     '  design-system-grower review [design-system-dir] [--port 4173] [--no-open]',
     '  design-system-grower install-instructions [design-system-dir] [--agents-out AGENTS.md] [--claude-out CLAUDE.md]',
+    '  node src/cli.mjs init [target-dir] [--design-system <dir>] [--no-open]',
     '  node src/cli.mjs scan [target-dir] --out catalog.json',
     '  node src/cli.mjs instruct [design-system-dir]',
     '  node src/cli.mjs decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',

@@ -75,19 +75,21 @@ export async function writeCatalog(catalog, outputPath) {
   return resolvedOutput;
 }
 
-export async function writeDesignSystemArtifacts(catalog, outputDir) {
+export async function writeDesignSystemArtifacts(catalog, outputDir, options = {}) {
   const resolvedOutputDir = path.resolve(outputDir);
   await fs.mkdir(resolvedOutputDir, { recursive: true });
+  const decisions = await decisionsForCatalog(catalog, resolvedOutputDir, options);
+  const assets = buildApprovedAssets(catalog, decisions);
 
   const artifacts = [
     ['inventory.json', catalog.inventory],
     ['situations.json', catalog.situations],
     ['candidates.json', catalog.candidates],
-    ['decisions.json', buildInitialDecisions(catalog)],
-    ['assets.json', buildApprovedAssets(catalog, [])],
-    ['assets.md', buildAssetsMarkdown([])],
+    ['decisions.json', decisions],
+    ['assets.json', assets],
+    ['assets.md', buildAssetsMarkdown(assets)],
     ['decisions.md', buildDecisionsMarkdown(catalog)],
-    ['agent-rules.md', buildAgentRulesMarkdown(catalog)],
+    ['agent-rules.md', buildAgentRulesMarkdown(catalog, decisions)],
     ['review.html', buildReviewHtml(catalog)],
   ];
 
@@ -98,4 +100,48 @@ export async function writeDesignSystemArtifacts(catalog, outputDir) {
   }
 
   return resolvedOutputDir;
+}
+
+async function decisionsForCatalog(catalog, outputDir, options) {
+  const initialDecisions = buildInitialDecisions(catalog);
+
+  if (!options.preserveDecisions) {
+    return initialDecisions;
+  }
+
+  const existingDecisions = await readExistingDecisions(path.join(outputDir, 'decisions.json'));
+  if (!existingDecisions) {
+    return initialDecisions;
+  }
+
+  const existingByCandidate = new Map(
+    existingDecisions
+      .filter((decision) => decision?.candidateId)
+      .map((decision) => [decision.candidateId, decision]),
+  );
+  const currentCandidateIds = new Set(initialDecisions.map((decision) => decision.candidateId));
+  const merged = initialDecisions.map((decision) => ({
+    ...decision,
+    ...(existingByCandidate.get(decision.candidateId) ?? {}),
+    clusterId: decision.clusterId,
+    recommendedAction: decision.recommendedAction,
+    safetyLevel: decision.safetyLevel,
+  }));
+  const carriedForward = existingDecisions.filter((decision) => (
+    decision?.candidateId && !currentCandidateIds.has(decision.candidateId)
+  ));
+
+  return [...merged, ...carriedForward];
+}
+
+async function readExistingDecisions(decisionsPath) {
+  try {
+    const decisions = JSON.parse(await fs.readFile(decisionsPath, 'utf8'));
+    return Array.isArray(decisions) ? decisions : null;
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
 }

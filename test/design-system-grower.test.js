@@ -11,6 +11,7 @@ import {
   extractClassCompositionCalls,
   extractCvaDefinitions,
   extractJsxClassNames,
+  runInit,
   startReviewServer,
 } from '../src/index.js';
 import { main, parseArgs } from '../src/cli.js';
@@ -588,6 +589,108 @@ test('review server serves review board and generated artifacts', async () => {
   }
 });
 
+test('init writes artifacts, prints summary, starts review server, and shows next steps', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <>
+          <input className="block w-full rounded border px-3 py-2 text-sm" />
+          <select className="block w-full rounded border px-3 py-2 text-sm" />
+        </>;
+      }
+    `,
+  });
+  const designSystemDir = path.join(fixtureDir, 'design-system');
+  let stdout = '';
+  let serverStarted = false;
+
+  const exitCode = await runInit({
+    target: fixtureDir,
+    designSystem: designSystemDir,
+    noOpen: true,
+    port: 0,
+    waitForShutdown: async (server) => {
+      serverStarted = true;
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      const response = await fetch(`http://127.0.0.1:${port}/`);
+      const html = await response.text();
+
+      assert.equal(response.status, 200);
+      assert.match(html, /design-system-grower review/);
+      await new Promise((resolve) => {
+        server.close(resolve);
+      });
+    },
+  }, {
+    stdout: { write: (message) => { stdout += message; } },
+    stderr: { write: () => {} },
+  });
+
+  const catalog = JSON.parse(await fs.readFile(path.join(designSystemDir, 'catalog.json'), 'utf8'));
+  const candidates = JSON.parse(await fs.readFile(path.join(designSystemDir, 'candidates.json'), 'utf8'));
+  const decisions = JSON.parse(await fs.readFile(path.join(designSystemDir, 'decisions.json'), 'utf8'));
+  const reviewHtml = await fs.readFile(path.join(designSystemDir, 'review.html'), 'utf8');
+
+  assert.equal(exitCode, 0);
+  assert.equal(serverStarted, true);
+  assert.equal(catalog.summary.filesScanned, 1);
+  assert.equal(candidates.length, 1);
+  assert.equal(decisions[0].candidateId, 'candidate-001');
+  assert.match(reviewHtml, /candidate-001/);
+  assert.match(stdout, /Candidates: 1/);
+  assert.match(stdout, /Drift candidates: 0/);
+  assert.match(stdout, /candidate-001: FieldPattern/);
+  assert.match(stdout, /Review URL: http:\/\/127\.0\.0\.1:/);
+  assert.match(stdout, /dsg decide .*design-system.* candidate-001 reuse --name FieldPattern/);
+  assert.match(stdout, /dsg install-instructions .*design-system/);
+  assert.match(stdout, /dsg check \. --design-system .*design-system --strict/);
+});
+
+test('init preserves existing decisions when regenerating design-system artifacts', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <>
+          <input className="block w-full rounded border px-3 py-2 text-sm" />
+          <select className="block w-full rounded border px-3 py-2 text-sm" />
+        </>;
+      }
+    `,
+  });
+  const designSystemDir = path.join(fixtureDir, 'design-system');
+  await fs.mkdir(designSystemDir, { recursive: true });
+  await fs.writeFile(path.join(designSystemDir, 'decisions.json'), `${JSON.stringify([
+    {
+      candidateId: 'candidate-001',
+      status: 'approved',
+      userDecision: 'reuse',
+      assetName: 'PreservedField',
+    },
+  ], null, 2)}\n`, 'utf8');
+
+  await runInit({
+    target: fixtureDir,
+    designSystem: designSystemDir,
+    noOpen: true,
+    port: 0,
+    waitForShutdown: (server) => new Promise((resolve) => {
+      server.close(resolve);
+    }),
+  }, {
+    stdout: { write: () => {} },
+    stderr: { write: () => {} },
+  });
+
+  const decisions = JSON.parse(await fs.readFile(path.join(designSystemDir, 'decisions.json'), 'utf8'));
+  const assets = JSON.parse(await fs.readFile(path.join(designSystemDir, 'assets.json'), 'utf8'));
+
+  assert.equal(decisions[0].status, 'approved');
+  assert.equal(decisions[0].userDecision, 'reuse');
+  assert.equal(decisions[0].assetName, 'PreservedField');
+  assert.equal(assets[0].name, 'PreservedField');
+});
+
 test('review server returns source snippets and rejects traversal', async () => {
   const fixtureDir = await makeFixtureRepo({
     'src/Form.tsx': `
@@ -975,6 +1078,13 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     command: 'scan',
     target: 'repo',
     artifactsDir: 'design-system',
+  });
+  assert.deepEqual(parseArgs(['init', 'repo', '--design-system', 'design-system', '--port', '0', '--no-open']), {
+    command: 'init',
+    target: 'repo',
+    designSystem: 'design-system',
+    port: 0,
+    noOpen: true,
   });
   assert.deepEqual(parseArgs(['repo', '-o', 'catalog.json']), {
     command: 'scan',
