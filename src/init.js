@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { buildCatalog, writeCatalog, writeDesignSystemArtifacts } from './catalog.js';
 import { openReviewUrl, startReviewServer } from './review-server.js';
+import { roleSummaryLines } from './roles.js';
 
 export async function runInit(options = {}, streams = process) {
   const targetDir = path.resolve(options.target ?? process.cwd());
@@ -45,6 +46,7 @@ export function buildInitSummary(catalog, artifactsDir) {
     `Files scanned: ${catalog.summary.filesScanned}`,
     `Candidates: ${catalog.summary.candidates}`,
     `Drift candidates: ${driftCandidates(catalog).length}`,
+    ...roleSummaryLines(catalog.summary.roles),
     'Top candidates:',
   ];
   const topCandidates = catalog.candidates.slice(0, 3);

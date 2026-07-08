@@ -8,6 +8,7 @@ import test from 'node:test';
 
 import {
   buildCatalog,
+  classifyRole,
   extractClassCompositionCalls,
   extractCvaDefinitions,
   extractJsxClassNames,
@@ -57,6 +58,33 @@ test('extractJsxClassNames keeps only static class strings from template express
   assert.ok(classes.every((className) => !['${', ':', '?'].includes(className)));
 });
 
+test('classifyRole identifies core UI roles from tags and class heuristics', () => {
+  assert.equal(classifyRole({
+    source: { examples: [{ element: 'button' }] },
+    commonClasses: ['inline-flex', 'rounded-md', 'px-4', 'py-2'],
+    variantClasses: [],
+    categories: [],
+  }), 'Button');
+  assert.equal(classifyRole({
+    source: { examples: [{ element: 'div' }] },
+    commonClasses: ['w-full', 'rounded-md', 'border', 'px-3', 'py-2', 'focus:ring-2'],
+    variantClasses: [],
+    categories: [],
+  }), 'FormField');
+  assert.equal(classifyRole({
+    source: { examples: [{ element: 'div' }] },
+    commonClasses: ['rounded-md', 'border', 'bg-red-50', 'p-3', 'text-sm'],
+    variantClasses: [],
+    categories: [],
+  }), 'Alert');
+  assert.equal(classifyRole({
+    source: { examples: [{ element: 'span' }] },
+    commonClasses: ['inline-flex', 'items-center', 'rounded-full', 'px-2', 'text-xs'],
+    variantClasses: [],
+    categories: [],
+  }), 'Badge');
+});
+
 test('buildCatalog scans source files and scores duplicated UI clusters', async () => {
   const fixtureDir = await makeFixtureRepo({
     'src/Button.tsx': `
@@ -91,6 +119,39 @@ test('buildCatalog scans source files and scores duplicated UI clusters', async 
   assert.equal(catalog.clusters[0].examples[0].element, 'button');
   assert.deepEqual(catalog.clusters[0].variantClasses, []);
   assert.ok(catalog.clusters[0].score > 0);
+});
+
+test('buildCatalog adds candidate roles and summarizes role variants', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Roles.tsx': `
+      export function Roles() {
+        return <>
+          <button className="inline-flex cursor-pointer items-center rounded-md bg-blue-600 px-4 py-2 text-sm text-white">Save</button>
+          <button className="inline-flex cursor-pointer items-center rounded-md bg-blue-600 px-4 py-2 text-sm text-white">Done</button>
+          <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:ring-blue-500" />
+          <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:ring-blue-500" />
+          <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">Error</div>
+          <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">Warning</div>
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">New</span>
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">Beta</span>
+        </>;
+      }
+    `,
+  });
+
+  const catalog = await buildCatalog(fixtureDir);
+  const roles = new Set(catalog.candidates.map((candidate) => candidate.role));
+
+  assert.ok(roles.has('Button'));
+  assert.ok(roles.has('FormField'));
+  assert.ok(roles.has('Alert'));
+  assert.ok(roles.has('Badge'));
+  assert.equal(catalog.summary.roles.Button.variants, 1);
+  assert.equal(catalog.summary.roles.FormField.variants, 1);
+  assert.equal(catalog.summary.roles.Alert.variants, 1);
+  assert.equal(catalog.summary.roles.Badge.variants, 1);
+  assert.equal(catalog.summary.roles.Button.competingFamilies, 0);
+  assert.match(catalog.summary.roles.Button.topExample, /bg-blue-600/);
 });
 
 test('buildCatalog excludes template expression syntax tokens from candidate commonClasses', async () => {
@@ -525,7 +586,9 @@ test('main writes a JSON catalog to the requested output path', async () => {
 
   assert.equal(exitCode, 0);
   assert.match(stdout, /Wrote 1 clusters/);
+  assert.match(stdout, /FormField: 1 variant \(0 competing families\)/);
   assert.equal(catalog.summary.duplicateClusters, 1);
+  assert.equal(catalog.summary.roles.FormField.variants, 1);
   assert.equal(inventory.counts.files, 1);
   assert.ok(Array.isArray(situations));
   assert.equal(candidates.length, 1);
@@ -640,6 +703,7 @@ test('init writes artifacts, prints summary, starts review server, and shows nex
   assert.match(reviewHtml, /candidate-001/);
   assert.match(stdout, /Candidates: 1/);
   assert.match(stdout, /Drift candidates: 0/);
+  assert.match(stdout, /FormField: 1 variant \(0 competing families\)/);
   assert.match(stdout, /candidate-001: FieldPattern/);
   assert.match(stdout, /Review URL: http:\/\/127\.0\.0\.1:/);
   assert.match(stdout, /dsg decide .*design-system.* candidate-001 reuse --name FieldPattern/);

@@ -8,6 +8,7 @@ import { buildAgentRulesMarkdown } from './decisions.js';
 import { runInit } from './init.js';
 import { startMcpServer } from './mcp-server.js';
 import { openReviewUrl, startReviewServer } from './review-server.js';
+import { roleSummaryLines } from './roles.js';
 
 export async function main(argv = process.argv.slice(2), streams = process) {
   const options = parseArgs(argv);
@@ -107,9 +108,13 @@ export async function main(argv = process.argv.slice(2), streams = process) {
   const writtenPath = await writeCatalog(catalog, outputPath);
   const artifactsDir = await writeDesignSystemArtifacts(catalog, options.artifactsDir ?? path.dirname(writtenPath));
 
-  streams.stdout.write(
-    `Wrote ${catalog.summary.duplicateClusters} clusters, ${catalog.summary.situations} situations, and ${catalog.summary.candidates} candidates from ${catalog.summary.filesScanned} files to ${writtenPath}\nArtifacts: ${artifactsDir}\n`,
-  );
+  const roleLines = roleSummaryLines(catalog.summary.roles);
+  streams.stdout.write([
+    `Wrote ${catalog.summary.duplicateClusters} clusters, ${catalog.summary.situations} situations, and ${catalog.summary.candidates} candidates from ${catalog.summary.filesScanned} files to ${writtenPath}`,
+    ...roleLines,
+    `Artifacts: ${artifactsDir}`,
+    '',
+  ].join('\n'));
   return 0;
 }
 

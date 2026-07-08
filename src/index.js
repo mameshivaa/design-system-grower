@@ -9,6 +9,7 @@ export {
   normalizeClasses,
 } from './extractor.js';
 export { buildInventory } from './inventory.js';
+export { classifyRole, roleSummaryLines, summarizeRoles } from './roles.js';
 export { runInit } from './init.js';
 export { startReviewServer } from './review-server.js';
 export { findJsxFiles } from './scanner.js';
