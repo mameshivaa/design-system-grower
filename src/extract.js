@@ -7,7 +7,10 @@ const execFileAsync = promisify(execFile);
 
 export async function runExtract(options = {}) {
   const designSystemDir = path.resolve(options.designSystemDir);
-  const repoRoot = path.dirname(designSystemDir);
+  // Source files live in the scanned repo (catalog.target), which is not
+  // necessarily the parent of the artifacts directory.
+  const catalog = await readJson(path.join(designSystemDir, 'catalog.json'), null);
+  const repoRoot = catalog?.target ? path.resolve(catalog.target) : path.dirname(designSystemDir);
   const assets = await readJson(path.join(designSystemDir, 'assets.json'), []);
   const asset = assets.find((entry) => entry.id === options.assetId);
 
@@ -20,7 +23,7 @@ export async function runExtract(options = {}) {
   const source = await fs.readFile(sourceFile, 'utf8');
   const extraction = extractJsxElementAt(source, sourceLocation);
   const componentName = toPascalCase(asset.name || asset.id);
-  const outputDir = path.resolve(repoRoot, options.outDir ?? 'components/ui');
+  const outputDir = options.outDir ? path.resolve(options.outDir) : path.join(repoRoot, 'components/ui');
   const outputFile = path.join(outputDir, `${toKebabCase(componentName)}.jsx`);
 
   if (!options.force && await fileExists(outputFile)) {
@@ -310,13 +313,38 @@ async function fileExists(filePath) {
 
 function findOpeningTagStart(source, offset, element) {
   const needle = element ? `<${element}` : '<';
+  const isBoundary = (index) => {
+    if (!element) {
+      return true;
+    }
+    const after = source[index + needle.length];
+    return after === undefined || /[\s/>]/.test(after);
+  };
+
+  // The recorded location points at the className attribute, which can sit
+  // several lines below the tag opening in multi-line JSX. Search backwards
+  // for the nearest opening tag whose attribute span still contains the offset.
+  let candidate = source.lastIndexOf(needle, offset);
+  while (candidate >= 0) {
+    if (isBoundary(candidate)) {
+      const closeAngle = source.indexOf('>', candidate);
+      if (closeAngle < 0 || closeAngle >= offset) {
+        return candidate;
+      }
+      // Nearest same-name tag closes before the offset, so nothing contains it.
+      break;
+    }
+    candidate = source.lastIndexOf(needle, candidate - 1);
+  }
+
+  // Single-line JSX: the tag may open right at or after the recorded column.
   const lineEnd = source.indexOf('\n', offset);
   const limit = lineEnd < 0 ? source.length : lineEnd;
   const onLine = source.indexOf(needle, offset);
-  if (onLine >= 0 && onLine <= limit) {
+  if (onLine >= 0 && onLine <= limit && isBoundary(onLine)) {
     return onLine;
   }
-  return source.indexOf(needle, offset);
+  return -1;
 }
 
 function lineColumnToOffset(source, line, column) {
