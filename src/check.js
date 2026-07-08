@@ -108,7 +108,7 @@ export function formatMarkdownReport(violations) {
   return lines.join('\n');
 }
 
-async function loadApprovedAssets(artifactsDir) {
+export async function loadApprovedAssets(artifactsDir) {
   const assets = await readJson(path.join(artifactsDir, 'assets.json'), []);
   if (Array.isArray(assets) && assets.length > 0) {
     return assets;
@@ -121,6 +121,75 @@ async function loadApprovedAssets(artifactsDir) {
   }
 
   return Array.isArray(assets) ? assets : [];
+}
+
+export function checkClassesAgainstAssets(classes, assets) {
+  const usageClasses = Array.isArray(classes)
+    ? classes
+    : String(classes ?? '').split(/\s+/).filter(Boolean);
+  const usage = {
+    file: '(input)',
+    line: 1,
+    column: 1,
+    element: 'classes',
+    classes: usageClasses,
+  };
+  const usageSet = normalizedClassSet(usageClasses);
+  let bestMatch = null;
+
+  for (const asset of assets) {
+    const signature = normalizedClassSet(asset.commonClasses);
+    const deprecatedSignatures = deprecatedClassSets(asset.deprecatedClasses);
+
+    for (const deprecatedSignature of deprecatedSignatures) {
+      const similarity = jaccard(usageSet, deprecatedSignature);
+      if (similarity >= SIMILARITY_THRESHOLD && (!bestMatch || bestMatch.verdict !== 'deprecated' || similarity > bestMatch.similarity)) {
+        bestMatch = buildClassCheckResult('deprecated', usage, asset, deprecatedSignature, similarity);
+      }
+    }
+
+    if (signature.size === 0) {
+      continue;
+    }
+
+    const similarity = jaccard(usageSet, signature);
+    if (similarity === 1) {
+      const result = buildClassCheckResult('ok', usage, asset, signature, similarity);
+      if (!bestMatch || bestMatch.verdict !== 'deprecated') {
+        bestMatch = result;
+      }
+      continue;
+    }
+
+    if (similarity >= SIMILARITY_THRESHOLD && (!bestMatch || bestMatch.verdict !== 'deprecated' && similarity > bestMatch.similarity)) {
+      bestMatch = buildClassCheckResult('near-miss', usage, asset, signature, similarity);
+    }
+  }
+
+  if (bestMatch) {
+    return bestMatch;
+  }
+
+  return {
+    verdict: 'near-miss',
+    assetName: null,
+    assetId: null,
+    similarity: 0,
+    missingClasses: [],
+    extraClasses: [...usageSet].sort(),
+  };
+}
+
+function buildClassCheckResult(verdict, usage, asset, referenceSet, similarity) {
+  const violation = buildViolation(verdict === 'ok' ? 'near-miss' : verdict, usage, asset, referenceSet, similarity);
+  return {
+    verdict,
+    assetName: violation.assetName,
+    assetId: violation.assetId,
+    similarity,
+    missingClasses: violation.missingClasses,
+    extraClasses: violation.extraClasses,
+  };
 }
 
 async function scanUsages(repoDir, filesOption) {
