@@ -1,5 +1,6 @@
 # design-system-grower
 
+[![npm](https://img.shields.io/npm/v/design-system-grower)](https://www.npmjs.com/package/design-system-grower)
 [![CI](https://github.com/mameshivaa/design-system-grower/actions/workflows/ci.yml/badge.svg)](https://github.com/mameshivaa/design-system-grower/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
