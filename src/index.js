@@ -9,6 +9,7 @@ export {
   extractJsxClassNames,
   normalizeClasses,
 } from './extractor.js';
+export { extractJsxElementAt, runExtract } from './extract.js';
 export { buildInventory } from './inventory.js';
 export { classifyRole, roleSummaryLines, summarizeRoles } from './roles.js';
 export { runInit } from './init.js';

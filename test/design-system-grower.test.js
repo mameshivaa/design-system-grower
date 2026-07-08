@@ -1765,10 +1765,25 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     claudeOut: 'CLAUDE.md',
     force: true,
   });
+  assert.deepEqual(parseArgs([
+    'extract',
+    'design-system',
+    'asset-card',
+    '--out',
+    'components/ui',
+    '--force',
+  ]), {
+    command: 'extract',
+    target: 'design-system',
+    assetId: 'asset-card',
+    output: 'components/ui',
+    force: true,
+  });
   assert.throws(() => parseArgs(['decide', 'design-system', 'candidate-001', 'bad-action']), /Unknown decision action/);
   assert.throws(() => parseArgs(['check', 'repo']), /--design-system/);
   assert.throws(() => parseArgs(['hook-check']), /--design-system/);
   assert.throws(() => parseArgs(['mcp']), /--design-system/);
+  assert.throws(() => parseArgs(['extract', 'design-system']), /extract requires/);
 });
 
 test('package bin entry can invoke the CLI module', () => {
@@ -1783,6 +1798,144 @@ test('package bin entry can invoke the CLI module', () => {
   assert.match(result.stdout, /design-system-grower/);
 });
 
+test('extract lifts a simple div with provenance and equivalent class names', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Card.tsx': 'export function Card() {\n  return <div className="rounded border bg-white p-4 shadow-sm">Hello</div>;\n}\n',
+  });
+  const designSystemDir = await writeExtractAssets(fixtureDir, [{
+    id: 'asset-card',
+    name: 'SurfaceCard',
+    variantClasses: [],
+    usageExample: { file: 'src/Card.tsx', line: 2, column: 10, element: 'div' },
+    referenceLocations: [{ file: 'src/Card.tsx', line: 2, column: 10, element: 'div' }],
+  }]);
+  const outDir = path.join(fixtureDir, 'components/ui');
+
+  const exitCode = await main(['extract', designSystemDir, 'asset-card', '--out', outDir], {
+    stdout: { write: () => {} },
+  });
+
+  const component = await fs.readFile(path.join(outDir, 'surface-card.jsx'), 'utf8');
+  const provenance = JSON.parse(await fs.readFile(path.join(designSystemDir, 'provenance.json'), 'utf8'));
+
+  assert.equal(exitCode, 0);
+  assert.match(component, /Extracted from src\/Card\.tsx:2 by design-system-grower/);
+  assert.match(component, /export function SurfaceCard\(\{ children = "Hello" \} = \{\}\)/);
+  assert.match(component, /className="rounded border bg-white p-4 shadow-sm"/);
+  assert.match(component, /\{children\}/);
+  assert.equal(provenance.length, 1);
+  assert.equal(provenance[0].assetId, 'asset-card');
+  assert.equal(provenance[0].componentPath, 'components/ui/surface-card.jsx');
+  assert.equal(provenance[0].sourceFile, 'src/Card.tsx');
+  assert.equal(provenance[0].sourceLine, 2);
+});
+
+test('extract preserves nested JSX boundaries exactly', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Panel.tsx': [
+      'export function Panel() {',
+      '  return <section className="rounded border p-4">',
+      '    <header className="font-medium">Title</header>',
+      '    <div className="mt-2 text-sm">Body</div>',
+      '  </section>;',
+      '}',
+      '',
+    ].join('\n'),
+  });
+  const designSystemDir = await writeExtractAssets(fixtureDir, [{
+    id: 'asset-panel',
+    name: 'InfoPanel',
+    variantClasses: [],
+    usageExample: { file: 'src/Panel.tsx', line: 2, column: 10, element: 'section' },
+    referenceLocations: [{ file: 'src/Panel.tsx', line: 2, column: 10, element: 'section' }],
+  }]);
+
+  await main(['extract', designSystemDir, 'asset-panel'], {
+    stdout: { write: () => {} },
+  });
+
+  const component = await fs.readFile(path.join(fixtureDir, 'components/ui/info-panel.jsx'), 'utf8');
+  assert.match(component, /<section className="rounded border p-4">/);
+  assert.match(component, /<header className="font-medium">Title<\/header>/);
+  assert.match(component, /<div className="mt-2 text-sm">Body<\/div>/);
+  assert.match(component, /<\/section>/);
+});
+
+test('extract promotes variantClasses to a variant prop when class differences are clear', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Buttons.tsx': [
+      'export function Buttons() {',
+      '  return <>',
+      '    <button className="inline-flex rounded px-3 py-2 text-sm bg-blue-600 text-white">Save</button>',
+      '    <button className="inline-flex rounded px-3 py-2 text-sm bg-slate-900 text-white">Cancel</button>',
+      '  </>;',
+      '}',
+      '',
+    ].join('\n'),
+  });
+  const designSystemDir = await writeExtractAssets(fixtureDir, [{
+    id: 'asset-action-button',
+    name: 'ActionButton',
+    variantClasses: ['bg-blue-600', 'bg-slate-900'],
+    usageExample: { file: 'src/Buttons.tsx', line: 3, column: 5, element: 'button' },
+    referenceLocations: [
+      { file: 'src/Buttons.tsx', line: 3, column: 5, element: 'button' },
+      { file: 'src/Buttons.tsx', line: 4, column: 5, element: 'button' },
+    ],
+  }]);
+
+  await main(['extract', designSystemDir, 'asset-action-button'], {
+    stdout: { write: () => {} },
+  });
+
+  const component = await fs.readFile(path.join(fixtureDir, 'components/ui/action-button.jsx'), 'utf8');
+  assert.match(component, /const variantClassNames = \{/);
+  assert.match(component, /"default": "bg-blue-600"/);
+  assert.match(component, /"variant2": "bg-slate-900"/);
+  assert.match(component, /export function ActionButton\(\{ variant = 'default', children = "Save" \} = \{\}\)/);
+  assert.match(component, /className=\{`inline-flex rounded px-3 py-2 text-sm text-white \$\{variantClassNames\[variant\] \?\? variantClassNames\.default\}`\}/);
+});
+
+test('extract fails explicitly when JSX cannot be cut safely', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Broken.tsx': 'export function Broken() {\n  return <div className="rounded border">Broken;\n}\n',
+  });
+  const designSystemDir = await writeExtractAssets(fixtureDir, [{
+    id: 'asset-broken',
+    name: 'BrokenCard',
+    variantClasses: [],
+    usageExample: { file: 'src/Broken.tsx', line: 2, column: 10, element: 'div' },
+    referenceLocations: [{ file: 'src/Broken.tsx', line: 2, column: 10, element: 'div' }],
+  }]);
+
+  await assert.rejects(
+    () => main(['extract', designSystemDir, 'asset-broken'], { stdout: { write: () => {} } }),
+    /Could not find matching closing tag/,
+  );
+});
+
+test('extract refuses to overwrite existing files without --force', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Card.tsx': 'export function Card() {\n  return <div className="rounded border">Hello</div>;\n}\n',
+  });
+  const designSystemDir = await writeExtractAssets(fixtureDir, [{
+    id: 'asset-card',
+    name: 'SurfaceCard',
+    variantClasses: [],
+    usageExample: { file: 'src/Card.tsx', line: 2, column: 10, element: 'div' },
+    referenceLocations: [{ file: 'src/Card.tsx', line: 2, column: 10, element: 'div' }],
+  }]);
+
+  await main(['extract', designSystemDir, 'asset-card'], {
+    stdout: { write: () => {} },
+  });
+
+  await assert.rejects(
+    () => main(['extract', designSystemDir, 'asset-card'], { stdout: { write: () => {} } }),
+    /already exists/,
+  );
+});
+
 async function makeFixtureRepo(files) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsg-'));
 
@@ -1793,6 +1946,19 @@ async function makeFixtureRepo(files) {
   }
 
   return root;
+}
+
+async function writeExtractAssets(root, assets) {
+  const designSystemDir = path.join(root, 'design-system');
+  await fs.mkdir(designSystemDir, { recursive: true });
+  await fs.writeFile(path.join(designSystemDir, 'assets.json'), `${JSON.stringify(assets.map((asset) => ({
+    status: 'approved',
+    commonClasses: [],
+    deprecatedClasses: [],
+    elementTags: [asset.usageExample.element],
+    ...asset,
+  })), null, 2)}\n`, 'utf8');
+  return designSystemDir;
 }
 
 async function runMcpSession(designSystemDir, requests) {
