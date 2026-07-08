@@ -21,12 +21,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/design-system-grower/design-system-grower.git"
+    "url": "git+https://github.com/mameshivaa/design-system-grower.git"
   },
   "bugs": {
-    "url": "https://github.com/design-system-grower/design-system-grower/issues"
+    "url": "https://github.com/mameshivaa/design-system-grower/issues"
   },
-  "homepage": "https://github.com/design-system-grower/design-system-grower#readme",
+  "homepage": "https://github.com/mameshivaa/design-system-grower#readme",
   "engines": {
     "node": ">=20"
   },
