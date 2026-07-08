@@ -7,8 +7,11 @@ import { analyzeSource } from './extractor.js';
 import { findJsxFiles } from './scanner.js';
 
 const SIMILARITY_THRESHOLD = 0.6;
-const NEW_VARIANT_MIN_SIMILARITY = 0.5;
+const NEW_VARIANT_MIN_SIMILARITY = 0.65;
 const NEW_VARIANT_MAX_SIMILARITY = 0.95;
+
+// Catch-all roles produce noise, not actionable "you invented another X" findings.
+const NEW_VARIANT_SKIPPED_ROLES = new Set(['Other', 'Layout', 'Text']);
 const execFileAsync = promisify(execFile);
 
 export async function runDesignSystemCheck(options) {
@@ -343,6 +346,9 @@ function findNewVariantMatch(usage, usageSet, candidateEntries, roleCounts) {
       hasExactCandidateMatch = true;
       continue;
     }
+    if (NEW_VARIANT_SKIPPED_ROLES.has(entry.role)) {
+      continue;
+    }
     if (
       similarity >= NEW_VARIANT_MIN_SIMILARITY
       && similarity <= NEW_VARIANT_MAX_SIMILARITY
@@ -498,14 +504,14 @@ function inlineClasses(classes) {
 
 function messageFor(violation) {
   if (violation.type === 'deprecated') {
-    return `${violation.assetName} の deprecated class に近い使用です。承認済み asset に合わせてください。`;
+    return `This usage matches the deprecated family of ${violation.assetName}. Use the canonical classes instead.`;
   }
 
   if (violation.type === 'new-variant') {
-    return `既存パターンの新しい変種を発明しています。これは ${violation.role} の ${violation.nextVariantNumber} つ目の変種になります。`;
+    return `This invents a new variant of an existing pattern — it would be ${violation.role} variant #${violation.nextVariantNumber}. Reuse an existing variant or promote this one on purpose.`;
   }
 
-  return `${violation.assetName} にほぼ一致。合わせるか、意図的な差分なら decisions に記録せよ。`;
+  return `Almost matches ${violation.assetName}. Align with it, or record an intentional decision.`;
 }
 
 function hasGlobSyntax(value) {

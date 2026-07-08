@@ -1064,7 +1064,7 @@ test('check reports a near-miss against an approved asset', async () => {
 
   assert.equal(exitCode, 0);
   assert.match(stdout, /near-miss FormInput/);
-  assert.match(stdout, /FormInput にほぼ一致/);
+  assert.match(stdout, /Almost matches FormInput/);
   assert.match(stdout, /src\/Form\.tsx:3/);
   assert.match(stdout, /missing: focus:ring-blue-500/);
   assert.match(stdout, /extra: focus:ring-red-500/);
@@ -1150,8 +1150,8 @@ test('check reports a new-variant from unapproved catalog candidates', async () 
 
   assert.equal(exitCode, 0);
   assert.match(stdout, /new-variant Button/);
-  assert.match(stdout, /既存パターンの新しい変種を発明しています/);
-  assert.match(stdout, /これは Button の 5 つ目の変種になります/);
+  assert.match(stdout, /invents a new variant of an existing pattern/);
+  assert.match(stdout, /Button variant #5/);
 });
 
 test('check does not report an exact unapproved candidate match as a new-variant', async () => {
