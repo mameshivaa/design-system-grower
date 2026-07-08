@@ -823,6 +823,90 @@ test('install-instructions writes AGENTS and CLAUDE files without overwriting by
   );
 });
 
+test('check reports a near-miss against an approved asset', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />;
+      }
+    `,
+  });
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  let stdout = '';
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir, '--files', 'src/**/*.tsx'], {
+    stdout: { write: (message) => { stdout += message; } },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout, /near-miss FormInput/);
+  assert.match(stdout, /FormInput にほぼ一致/);
+  assert.match(stdout, /src\/Form\.tsx:3/);
+  assert.match(stdout, /missing: focus:ring-blue-500/);
+  assert.match(stdout, /extra: focus:ring-red-500/);
+});
+
+test('check does not report an exact approved asset match', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />;
+      }
+    `,
+  });
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  let stdout = '';
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir], {
+    stdout: { write: (message) => { stdout += message; } },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout, /no design-system drift found/);
+  assert.doesNotMatch(stdout, /near-miss/);
+});
+
+test('check exits 1 in strict mode when drift is found', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />;
+      }
+    `,
+  });
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir, '--strict'], {
+    stdout: { write: () => {} },
+  });
+
+  assert.equal(exitCode, 1);
+});
+
+test('check writes a markdown report', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />;
+      }
+    `,
+  });
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  const reportPath = path.join(fixtureDir, 'dsg-check.md');
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir, '--report', reportPath], {
+    stdout: { write: () => {} },
+  });
+  const report = await fs.readFile(reportPath, 'utf8');
+
+  assert.equal(exitCode, 0);
+  assert.match(report, /## dsg check/);
+  assert.match(report, /\| Location \| Type \| Asset \| Diff \|/);
+  assert.match(report, /src\/Form\.tsx:3/);
+  assert.match(report, /FormInput/);
+  assert.match(report, /focus:ring-red-500/);
+});
+
 test('parseArgs rejects invalid options before running the scanner', () => {
   assert.throws(() => parseArgs(['--min-occurrences', '1']), /greater than or equal to 2/);
   assert.throws(() => parseArgs(['--missing']), /Unknown option/);
@@ -865,6 +949,24 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     assetName: 'SurfaceCard',
   });
   assert.deepEqual(parseArgs([
+    'check',
+    'repo',
+    '--design-system',
+    'design-system',
+    '--files',
+    'src/**/*.tsx,components/*.tsx',
+    '--strict',
+    '--report',
+    'report.md',
+  ]), {
+    command: 'check',
+    target: 'repo',
+    designSystem: 'design-system',
+    files: 'src/**/*.tsx,components/*.tsx',
+    strict: true,
+    report: 'report.md',
+  });
+  assert.deepEqual(parseArgs([
     'install-instructions',
     'design-system',
     '--agents-out',
@@ -880,6 +982,7 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     force: true,
   });
   assert.throws(() => parseArgs(['decide', 'design-system', 'candidate-001', 'bad-action']), /Unknown decision action/);
+  assert.throws(() => parseArgs(['check', 'repo']), /--design-system/);
 });
 
 test('package bin entry can invoke the CLI module', () => {
@@ -904,4 +1007,43 @@ async function makeFixtureRepo(files) {
   }
 
   return root;
+}
+
+async function makeDesignSystemArtifacts(root) {
+  const designSystemDir = path.join(root, 'design-system');
+  const commonClasses = [
+    'block',
+    'w-full',
+    'rounded-md',
+    'border',
+    'border-neutral-300',
+    'px-3',
+    'py-2',
+    'text-sm',
+    'shadow-sm',
+    'focus:border-blue-500',
+    'focus:ring-blue-500',
+  ];
+  await fs.mkdir(designSystemDir, { recursive: true });
+  await fs.writeFile(path.join(designSystemDir, 'assets.json'), `${JSON.stringify([
+    {
+      id: 'asset-form-input',
+      name: 'FormInput',
+      candidateId: 'candidate-001',
+      actionType: 'reuse',
+      status: 'approved',
+      commonClasses,
+      variantClasses: [],
+      referenceLocations: [{ file: 'src/Approved.tsx', line: 1, column: 1, element: 'input' }],
+    },
+  ], null, 2)}\n`, 'utf8');
+  await fs.writeFile(path.join(designSystemDir, 'decisions.json'), `${JSON.stringify([
+    {
+      candidateId: 'candidate-001',
+      status: 'approved',
+      userDecision: 'reuse',
+      assetName: 'FormInput',
+    },
+  ], null, 2)}\n`, 'utf8');
+  return designSystemDir;
 }

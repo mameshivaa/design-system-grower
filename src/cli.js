@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCatalog, writeCatalog, writeDesignSystemArtifacts } from './catalog.js';
+import { runDesignSystemCheck } from './check.js';
 import { saveDecision, VALID_ACTIONS, writeAssetArtifacts } from './decision-actions.js';
 import { buildAgentRulesMarkdown } from './decisions.js';
 import { openReviewUrl, startReviewServer } from './review-server.js';
@@ -49,6 +50,18 @@ export async function main(argv = process.argv.slice(2), streams = process) {
     return 0;
   }
 
+  if (options.command === 'check') {
+    const result = await runDesignSystemCheck({
+      repoPath: options.target,
+      designSystem: options.designSystem,
+      files: options.files,
+      strict: options.strict,
+      report: options.report,
+    });
+    streams.stdout.write(result.text);
+    return result.exitCode;
+  }
+
   if (options.command === 'review') {
     const artifactsDir = path.resolve(options.target ?? path.join(process.cwd(), 'design-system'));
     const review = await startReviewServer({
@@ -88,7 +101,7 @@ export async function main(argv = process.argv.slice(2), streams = process) {
 
 export function parseArgs(argv) {
   const options = {};
-  const knownCommands = new Set(['scan', 'instruct', 'decide', 'review', 'install-instructions']);
+  const knownCommands = new Set(['scan', 'instruct', 'decide', 'review', 'install-instructions', 'check']);
   const command = knownCommands.has(argv[0]) ? argv[0] : 'scan';
   const args = knownCommands.has(argv[0]) ? argv.slice(1) : argv;
   options.command = command;
@@ -119,6 +132,29 @@ export function parseArgs(argv) {
 
     if (arg === '--artifacts-dir') {
       options.artifactsDir = requireValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--design-system') {
+      options.designSystem = requireValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--files') {
+      options.files = requireValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--strict') {
+      options.strict = true;
+      continue;
+    }
+
+    if (arg === '--report') {
+      options.report = requireValue(args, index, arg);
       index += 1;
       continue;
     }
@@ -187,7 +223,7 @@ export function parseArgs(argv) {
       throw new Error(`Unexpected argument: ${arg}`);
     }
 
-    if (command === 'install-instructions' || command === 'review') {
+    if (command === 'install-instructions' || command === 'review' || command === 'check') {
       if (!options.target) {
         options.target = arg;
         continue;
@@ -207,6 +243,15 @@ export function parseArgs(argv) {
     }
     if (!VALID_ACTIONS.has(options.userDecision)) {
       throw new Error(`Unknown decision action: ${options.userDecision}`);
+    }
+  }
+
+  if (command === 'check') {
+    if (!options.target) {
+      throw new Error('check requires: <repo-path> --design-system <artifacts-dir>');
+    }
+    if (!options.designSystem) {
+      throw new Error('check requires --design-system <artifacts-dir>');
     }
   }
 
@@ -274,17 +319,23 @@ export function helpText() {
     '  design-system-grower scan [target-dir] --out catalog.json',
     '  design-system-grower instruct [design-system-dir]',
     '  design-system-grower decide [design-system-dir] <candidate-id> <action> [--name AssetName]',
+    '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--strict] [--report out.md]',
     '  design-system-grower review [design-system-dir] [--port 4173] [--no-open]',
     '  design-system-grower install-instructions [design-system-dir] [--agents-out AGENTS.md] [--claude-out CLAUDE.md]',
     '  node src/cli.mjs scan [target-dir] --out catalog.json',
     '  node src/cli.mjs instruct [design-system-dir]',
     '  node src/cli.mjs decide [design-system-dir] <candidate-id> <action> [--name AssetName]',
+    '  node src/cli.mjs check <repo-path> --design-system <artifacts-dir>',
     '  node src/cli.mjs review [design-system-dir] [--no-open]',
     '  node src/cli.mjs install-instructions [design-system-dir] [--force]',
     '',
     'Options:',
     '  -o, --out <path>           Write JSON catalog to path',
     '  --artifacts-dir <path>     Write inventory, situations, candidates, decisions, assets, agent rules, and review HTML',
+    '  --design-system <path>     Read approved design-system artifacts for check',
+    '  --files <glob,glob>        Limit check to comma-separated files or simple globs',
+    '  --strict                   Exit 1 from check when drift is found',
+    '  --report <path>            Write a markdown check report',
     '  --name <AssetName>         Name the approved asset when using decide',
     '  --host <host>              Host for the local review server (default: 127.0.0.1)',
     '  --port <port>              Port for the local review server (default: 4173, 0 for random)',
