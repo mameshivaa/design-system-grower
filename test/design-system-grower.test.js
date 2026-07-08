@@ -14,6 +14,7 @@ import {
   startReviewServer,
 } from '../src/index.js';
 import { main, parseArgs } from '../src/cli.js';
+import { buildReviewHtml } from '../src/decisions.js';
 
 test('extractJsxClassNames finds JSX elements with literal className strings', () => {
   const source = `
@@ -303,6 +304,148 @@ test('review server serves review board and generated artifacts', async () => {
       review.server.close(resolve);
     });
   }
+});
+
+test('review server returns source snippets and rejects traversal', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <>
+          <input className="block w-full rounded border px-3 py-2 text-sm" />
+          <select className="block w-full rounded border px-3 py-2 text-sm" />
+        </>;
+      }
+    `,
+  });
+  const outputPath = path.join(fixtureDir, 'design-system', 'catalog.json');
+
+  await main([fixtureDir, '--out', outputPath], {
+    stdout: { write: () => {} },
+  });
+
+  const review = await startReviewServer({
+    artifactsDir: path.join(fixtureDir, 'design-system'),
+    port: 0,
+  });
+
+  try {
+    const snippetResponse = await fetch(new URL('/api/snippet?candidateId=candidate-001&example=0&context=1', review.url));
+    const snippet = await snippetResponse.json();
+    const traversalResponse = await fetch(new URL('/api/snippet?file=../package.json&line=1', review.url));
+    const traversal = await traversalResponse.json();
+
+    assert.equal(snippetResponse.status, 200);
+    assert.equal(snippet.file, 'src/Form.tsx');
+    assert.ok(snippet.lines.some((line) => line.highlight && line.text.includes('input')));
+    assert.equal(traversalResponse.status, 403);
+    assert.match(traversal.error, /inside the scanned repo/);
+  } finally {
+    await new Promise((resolve) => {
+      review.server.close(resolve);
+    });
+  }
+});
+
+test('review server decide endpoint saves decisions and regenerates assets', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Cards.tsx': `
+      export function Cards() {
+        return <>
+          <Card className="rounded border bg-white p-4 shadow-sm" />
+          <Card className="rounded border bg-white p-4 shadow-sm" />
+        </>;
+      }
+    `,
+  });
+  const outputPath = path.join(fixtureDir, 'design-system', 'catalog.json');
+
+  await main([fixtureDir, '--out', outputPath], {
+    stdout: { write: () => {} },
+  });
+
+  const review = await startReviewServer({
+    artifactsDir: path.join(fixtureDir, 'design-system'),
+    port: 0,
+  });
+
+  try {
+    const decideResponse = await fetch(new URL('/api/decide', review.url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        candidateId: 'candidate-001',
+        decision: 'wrap',
+        assetName: 'SurfaceCard',
+      }),
+    });
+    const decidePayload = await decideResponse.json();
+    const decisions = JSON.parse(await fs.readFile(path.join(fixtureDir, 'design-system', 'decisions.json'), 'utf8'));
+    const assets = JSON.parse(await fs.readFile(path.join(fixtureDir, 'design-system', 'assets.json'), 'utf8'));
+    const assetsMarkdown = await fs.readFile(path.join(fixtureDir, 'design-system', 'assets.md'), 'utf8');
+    const agentRules = await fs.readFile(path.join(fixtureDir, 'design-system', 'agent-rules.md'), 'utf8');
+
+    assert.equal(decideResponse.status, 200);
+    assert.equal(decidePayload.decision.assetName, 'SurfaceCard');
+    assert.equal(decisions[0].status, 'approved');
+    assert.equal(decisions[0].userDecision, 'wrap');
+    assert.equal(assets[0].name, 'SurfaceCard');
+    assert.match(assetsMarkdown, /## SurfaceCard/);
+    assert.match(agentRules, /Prefer SurfaceCard as a wrapper component/);
+  } finally {
+    await new Promise((resolve) => {
+      review.server.close(resolve);
+    });
+  }
+});
+
+test('review HTML renders only top 20 scored candidates by default', () => {
+  const candidates = Array.from({ length: 25 }, (_, index) => {
+    const score = index + 1;
+    return {
+      id: `candidate-${String(index + 1).padStart(3, '0')}`,
+      clusterId: `cluster-${index + 1}`,
+      title: `Candidate ${index + 1}`,
+      assetNameSuggestion: `Asset${index + 1}`,
+      actionType: index % 2 === 0 ? 'reuse' : 'wrap',
+      safetyLevel: 'safe',
+      recommendedAction: index % 2 === 0 ? 'reuse' : 'wrap',
+      rationale: 'Repeated UI pattern.',
+      source: {
+        occurrences: 2,
+        files: 1,
+        examples: [{
+          file: 'src/App.tsx',
+          line: index + 1,
+          column: 1,
+          element: 'div',
+          sourceType: 'className',
+        }],
+      },
+      commonClasses: ['rounded', `p-${index + 1}`],
+      variantClasses: [],
+      categories: [{ category: index % 2 === 0 ? 'border' : 'spacing', count: 1 }],
+      score,
+    };
+  });
+  const html = buildReviewHtml({
+    target: '/tmp/project',
+    summary: {
+      filesScanned: 1,
+      situations: 0,
+      candidates: candidates.length,
+    },
+    situations: [],
+    candidates,
+  });
+  const renderedCards = html.match(/\n    <article class="card candidate-card"/g) ?? [];
+
+  assert.equal(renderedCards.length, 20);
+  assert.match(html, /20 of 25 candidates shown/);
+  assert.match(html, /Show all/);
+  assert.match(html, /Candidate 25/);
+  assert.doesNotMatch(html, /Candidate 1<\/h2>/);
+  assert.match(html, /reuse \/ border/);
+  assert.match(html, /<span class="badge">10 of 13 candidates<\/span>/);
 });
 
 test('instruct regenerates agent rules from approved decisions', async () => {
