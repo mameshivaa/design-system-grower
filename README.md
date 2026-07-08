@@ -1,8 +1,18 @@
 # design-system-grower
 
+[![CI](https://github.com/design-system-grower/design-system-grower/actions/workflows/ci.yml/badge.svg)](https://github.com/design-system-grower/design-system-grower/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 自分のコードから自分の design system を育てるツール。
 
 `design-system-grower` is an OSS-first, repo-first CLI for finding repeated UI patterns in React/TypeScript codebases and turning them into an agent-ready component catalog.
+
+## Quick Start
+
+```bash
+npx design-system-grower scan . --out design-system/catalog.json
+npx design-system-grower review design-system
+```
 
 The reviewable MVP spec is [docs/mvp-spec.md](docs/mvp-spec.md). The longer product vision is documented in [docs/vision.md](docs/vision.md).
 
