@@ -1,4 +1,5 @@
 import { hasDistinctiveClassMix } from './class-analysis.js';
+import { classifyRole } from './roles.js';
 
 export function buildCandidates(clusters, situations = [], competingFamilies = []) {
   const situationIds = new Set(situations.map((situation) => situation.id));
@@ -17,7 +18,7 @@ function buildClusterCandidate(cluster, index, situationIds) {
   const actionType = inferActionType(cluster, situationIds);
   const safetyLevel = inferSafetyLevel(actionType);
 
-  return {
+  const candidate = {
     id: `candidate-${String(index + 1).padStart(3, '0')}`,
     clusterId: cluster.id,
     title: candidateTitle(cluster, actionType),
@@ -37,45 +38,49 @@ function buildClusterCandidate(cluster, index, situationIds) {
     categories: cluster.categories,
     score: cluster.score,
   };
+  return { ...candidate, role: classifyRole(candidate) };
 }
 
 function buildObserveOnlyCandidates(situations, offset) {
   return situations
     .filter((situation) => isObserveOnlySituation(situation))
-    .map((situation, index) => ({
-      id: `candidate-${String(offset + index + 1).padStart(3, '0')}`,
-      situationId: situation.id,
-      title: `${situation.title}: unsupported`,
-      assetNameSuggestion: suggestSituationAssetName(situation),
-      actionType: 'unsupported',
-      safetyLevel: 'safe',
-      status: 'observe-only',
-      recommendedAction: 'unsupported',
-      rationale: rationaleFor('unsupported'),
-      source: {
-        occurrences: situation.evidence.length,
-        files: 0,
-        examples: situation.evidence.map((item) => ({
-          file: item,
-          line: 0,
-          column: 0,
-          element: situation.id,
-          className: situation.primaryResponse,
-          sourceType: 'situation',
-        })),
-      },
-      commonClasses: [],
-      variantClasses: [],
-      categories: [],
-      score: 0,
-    }));
+    .map((situation, index) => {
+      const candidate = {
+        id: `candidate-${String(offset + index + 1).padStart(3, '0')}`,
+        situationId: situation.id,
+        title: `${situation.title}: unsupported`,
+        assetNameSuggestion: suggestSituationAssetName(situation),
+        actionType: 'unsupported',
+        safetyLevel: 'safe',
+        status: 'observe-only',
+        recommendedAction: 'unsupported',
+        rationale: rationaleFor('unsupported'),
+        source: {
+          occurrences: situation.evidence.length,
+          files: 0,
+          examples: situation.evidence.map((item) => ({
+            file: item,
+            line: 0,
+            column: 0,
+            element: situation.id,
+            className: situation.primaryResponse,
+            sourceType: 'situation',
+          })),
+        },
+        commonClasses: [],
+        variantClasses: [],
+        categories: [],
+        score: 0,
+      };
+      return { ...candidate, role: classifyRole(candidate) };
+    });
 }
 
 function buildDriftCandidate(family, index) {
   const recommended = family.sides.find((side) => side.side === family.recommendedSide) ?? family.sides[0];
   const deprecated = family.sides.find((side) => side.side !== family.recommendedSide) ?? family.sides[1];
 
-  return {
+  const candidate = {
     id: `candidate-${String(index + 1).padStart(3, '0')}`,
     driftId: family.id,
     title: `${family.elementTags.join(' / ')} competing family: canonicalize`,
@@ -112,6 +117,7 @@ function buildDriftCandidate(family, index) {
       categorySignature: family.categorySignature,
     },
   };
+  return { ...candidate, role: classifyRole(candidate) };
 }
 
 function inferActionType(cluster, situationIds) {

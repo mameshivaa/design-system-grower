@@ -324,7 +324,7 @@ function renderCandidateCard(candidate) {
   const command = decideCommandFor(candidate);
   return `
     <article class="card candidate-card" data-candidate-id="${escapeHtml(candidate.id)}" data-example-index="0">
-      <div class="meta">${escapeHtml(candidate.id)} / ${escapeHtml(candidate.actionType)} / ${escapeHtml(categoryFor(candidate))} / ${escapeHtml(candidate.safetyLevel)} / <span class="score">score ${scoreFor(candidate)}</span></div>
+      <div class="meta">${escapeHtml(candidate.id)} / ${escapeHtml(candidate.actionType)} / ${escapeHtml(categoryFor(candidate))} / ${escapeHtml(candidate.safetyLevel)} / <span class="badge role-badge">${escapeHtml(roleFor(candidate))}</span> / <span class="score">score ${scoreFor(candidate)}</span></div>
       <h2>${escapeHtml(candidate.title)}</h2>
       <p>${escapeHtml(candidate.rationale)}</p>
       <p><strong>${candidate.source.occurrences}</strong> occurrences across <strong>${candidate.source.files}</strong> files</p>
@@ -361,7 +361,7 @@ function renderDriftCandidateCard(candidate) {
   const command = decideCommandFor(candidate);
   return `
     <article class="card candidate-card drift-card" data-candidate-id="${escapeHtml(candidate.id)}" data-example-index="0">
-      <div class="meta">${escapeHtml(candidate.id)} / canonicalize / drift / ${escapeHtml(candidate.safetyLevel)} / <span class="score">score ${scoreFor(candidate)}</span></div>
+      <div class="meta">${escapeHtml(candidate.id)} / canonicalize / drift / ${escapeHtml(candidate.safetyLevel)} / <span class="badge role-badge">${escapeHtml(roleFor(candidate))}</span> / <span class="score">score ${scoreFor(candidate)}</span></div>
       <h2>${escapeHtml(candidate.title)}</h2>
       <p>${escapeHtml(candidate.rationale)}</p>
       <p><strong>${candidate.source.occurrences}</strong> occurrences across <strong>${candidate.source.files}</strong> files. Recommended side: <strong>${escapeHtml(candidate.recommendedSide)}</strong>.</p>
@@ -427,15 +427,19 @@ function groupCandidates(candidates, allCandidates = candidates) {
 }
 
 function groupKeyFor(candidate) {
-  return `${candidate.actionType || 'unknown'}:${categoryFor(candidate)}`;
+  return `${roleFor(candidate)}:${candidate.actionType || 'unknown'}:${categoryFor(candidate)}`;
 }
 
 function groupLabelFor(candidate) {
-  return `${candidate.actionType || 'unknown'} / ${categoryFor(candidate)}`;
+  return `${roleFor(candidate)} / ${candidate.actionType || 'unknown'} / ${categoryFor(candidate)}`;
 }
 
 function categoryFor(candidate) {
   return candidate.categories?.[0]?.category ?? candidate.categories?.[0]?.name ?? candidate.categories?.[0] ?? 'uncategorized';
+}
+
+function roleFor(candidate) {
+  return candidate.role || 'Other';
 }
 
 function scoreFor(candidate) {
@@ -484,11 +488,15 @@ function sortedReviewCandidates(candidates) {
 }
 
 function groupKeyFor(candidate) {
-  return (candidate.actionType || 'unknown') + ':' + categoryFor(candidate);
+  return roleFor(candidate) + ':' + (candidate.actionType || 'unknown') + ':' + categoryFor(candidate);
 }
 
 function groupLabelFor(candidate) {
-  return (candidate.actionType || 'unknown') + ' / ' + categoryFor(candidate);
+  return roleFor(candidate) + ' / ' + (candidate.actionType || 'unknown') + ' / ' + categoryFor(candidate);
+}
+
+function roleFor(candidate) {
+  return candidate.role || 'Other';
 }
 
 function groupCandidates(candidates, allCandidates) {
@@ -533,7 +541,7 @@ function renderCandidateCard(candidate) {
   const command = decideCommandFor(candidate);
   const options = decisionActions.map((action) => '<option value="' + escapeHtml(action) + '"' + (action === candidate.recommendedAction ? ' selected' : '') + '>' + escapeHtml(action) + '</option>').join('');
   return '<article class="card candidate-card" data-candidate-id="' + escapeHtml(candidate.id) + '" data-example-index="0">' +
-    '<div class="meta">' + escapeHtml(candidate.id) + ' / ' + escapeHtml(candidate.actionType) + ' / ' + escapeHtml(categoryFor(candidate)) + ' / ' + escapeHtml(candidate.safetyLevel) + ' / <span class="score">score ' + scoreFor(candidate) + '</span></div>' +
+    '<div class="meta">' + escapeHtml(candidate.id) + ' / ' + escapeHtml(candidate.actionType) + ' / ' + escapeHtml(categoryFor(candidate)) + ' / ' + escapeHtml(candidate.safetyLevel) + ' / <span class="badge role-badge">' + escapeHtml(roleFor(candidate)) + '</span> / <span class="score">score ' + scoreFor(candidate) + '</span></div>' +
     '<h2>' + escapeHtml(candidate.title) + '</h2>' +
     '<p>' + escapeHtml(candidate.rationale) + '</p>' +
     '<p><strong>' + escapeHtml(candidate.source && candidate.source.occurrences) + '</strong> occurrences across <strong>' + escapeHtml(candidate.source && candidate.source.files) + '</strong> files</p>' +
@@ -562,7 +570,7 @@ function renderDriftCandidateCard(candidate) {
     '</section>'
   )).join('');
   return '<article class="card candidate-card drift-card" data-candidate-id="' + escapeHtml(candidate.id) + '" data-example-index="0">' +
-    '<div class="meta">' + escapeHtml(candidate.id) + ' / canonicalize / drift / ' + escapeHtml(candidate.safetyLevel) + ' / <span class="score">score ' + scoreFor(candidate) + '</span></div>' +
+    '<div class="meta">' + escapeHtml(candidate.id) + ' / canonicalize / drift / ' + escapeHtml(candidate.safetyLevel) + ' / <span class="badge role-badge">' + escapeHtml(roleFor(candidate)) + '</span> / <span class="score">score ' + scoreFor(candidate) + '</span></div>' +
     '<h2>' + escapeHtml(candidate.title) + '</h2>' +
     '<p>' + escapeHtml(candidate.rationale) + '</p>' +
     '<p><strong>' + escapeHtml(candidate.source && candidate.source.occurrences) + '</strong> occurrences across <strong>' + escapeHtml(candidate.source && candidate.source.files) + '</strong> files. Recommended side: <strong>' + escapeHtml(candidate.recommendedSide) + '</strong>.</p>' +

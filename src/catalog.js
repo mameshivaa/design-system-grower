@@ -12,6 +12,7 @@ import {
 } from './decisions.js';
 import { analyzeSource } from './extractor.js';
 import { buildInventory, isExistingDesignSystemSource } from './inventory.js';
+import { summarizeRoles } from './roles.js';
 import { findJsxFiles } from './scanner.js';
 import { diagnoseSituations } from './situations.js';
 
@@ -59,6 +60,7 @@ export async function buildCatalog(targetDir, options = {}) {
       situations: situations.length,
       candidates: candidates.length,
       competingFamilies: competingFamilies.length,
+      roles: summarizeRoles(candidates),
     },
     inventory,
     situations,
