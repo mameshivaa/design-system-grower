@@ -59,8 +59,10 @@ export async function main(argv = process.argv.slice(2), streams = process) {
       repoPath: options.target,
       designSystem: options.designSystem,
       files: options.files,
+      base: options.base,
       strict: options.strict,
       report: options.report,
+      stderr: streams.stderr,
     });
     streams.stdout.write(result.text);
     return result.exitCode;
@@ -163,6 +165,12 @@ export function parseArgs(argv) {
 
     if (arg === '--files') {
       options.files = requireValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--base') {
+      options.base = requireValue(args, index, arg);
       index += 1;
       continue;
     }
@@ -357,7 +365,7 @@ export function helpText() {
     '  design-system-grower scan [target-dir] --out catalog.json',
     '  design-system-grower instruct [design-system-dir]',
     '  design-system-grower decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
-    '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--strict] [--report out.md]',
+    '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--base <git-ref>] [--strict] [--report out.md]',
     '  design-system-grower mcp --design-system <artifacts-dir>',
     '  design-system-grower review [design-system-dir] [--port 4173] [--no-open]',
     '  design-system-grower install-instructions [design-system-dir] [--agents-out AGENTS.md] [--claude-out CLAUDE.md]',
@@ -375,6 +383,7 @@ export function helpText() {
     '  --artifacts-dir <path>     Write inventory, situations, candidates, decisions, assets, agent rules, and review HTML',
     '  --design-system <path>     Read approved design-system artifacts for check',
     '  --files <glob,glob>        Limit check to comma-separated files or simple globs',
+    '  --base <git-ref>           Limit check to files changed since git ref plus uncommitted changes',
     '  --strict                   Exit 1 from check when drift is found',
     '  --report <path>            Write a markdown check report',
     '  --name <AssetName>         Name the approved asset when using decide',
