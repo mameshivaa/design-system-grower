@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import {
@@ -1066,6 +1066,46 @@ test('check writes a markdown report', async () => {
   assert.match(report, /focus:ring-red-500/);
 });
 
+test('mcp stdio server lists, looks up, and checks approved assets', async () => {
+  const fixtureDir = await makeFixtureRepo({});
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  const responses = await runMcpSession(designSystemDir, [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } },
+    { jsonrpc: '2.0', method: 'notifications/initialized', params: {} },
+    { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_assets', arguments: {} } },
+    { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'lookup_pattern', arguments: { query: 'input block w-full rounded-md' } } },
+    { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'check_classes', arguments: { classes: 'block w-full rounded border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-red-500 focus:ring-red-500' } } },
+    { jsonrpc: '2.0', id: 6, method: 'unknown/method', params: {} },
+  ]);
+
+  assert.equal(responses.length, 6);
+  assert.equal(responses[0].result.protocolVersion, '2025-06-18');
+  assert.deepEqual(responses[0].result.capabilities, { tools: {} });
+  assert.equal(responses[0].result.serverInfo.name, 'design-system-grower');
+  assert.deepEqual(responses[1].result.tools.map((tool) => tool.name), ['list_assets', 'lookup_pattern', 'check_classes']);
+
+  const listedAssets = parseToolText(responses[2]);
+  assert.equal(listedAssets[0].name, 'FormInput');
+  assert.equal(listedAssets[0].action, 'reuse');
+  assert.deepEqual(listedAssets[0].elementTags, ['input']);
+  assert.ok(listedAssets[0].commonClasses.includes('focus:ring-blue-500'));
+  assert.ok(listedAssets[0].deprecatedClasses.includes('focus:ring-red-500'));
+
+  const matches = parseToolText(responses[3]);
+  assert.equal(matches[0].name, 'FormInput');
+  assert.ok(matches[0].canonicalClasses.includes('rounded-md'));
+  assert.match(matches[0].usageExample.snippet, /className=/);
+  assert.deepEqual(matches[0].referenceLocation, { file: 'src/Approved.tsx', line: 1, column: 1, element: 'input' });
+
+  const check = parseToolText(responses[4]);
+  assert.equal(check.verdict, 'deprecated');
+  assert.equal(check.assetName, 'FormInput');
+  assert.deepEqual(check.missingClasses, []);
+  assert.deepEqual(check.extraClasses, []);
+  assert.equal(responses[5].error.code, -32601);
+});
+
 test('parseArgs rejects invalid options before running the scanner', () => {
   assert.throws(() => parseArgs(['--min-occurrences', '1']), /greater than or equal to 2/);
   assert.throws(() => parseArgs(['--missing']), /Unknown option/);
@@ -1141,6 +1181,14 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     report: 'report.md',
   });
   assert.deepEqual(parseArgs([
+    'mcp',
+    '--design-system',
+    'design-system',
+  ]), {
+    command: 'mcp',
+    designSystem: 'design-system',
+  });
+  assert.deepEqual(parseArgs([
     'install-instructions',
     'design-system',
     '--agents-out',
@@ -1157,6 +1205,7 @@ test('parseArgs rejects invalid options before running the scanner', () => {
   });
   assert.throws(() => parseArgs(['decide', 'design-system', 'candidate-001', 'bad-action']), /Unknown decision action/);
   assert.throws(() => parseArgs(['check', 'repo']), /--design-system/);
+  assert.throws(() => parseArgs(['mcp']), /--design-system/);
 });
 
 test('package bin entry can invoke the CLI module', () => {
@@ -1181,6 +1230,45 @@ async function makeFixtureRepo(files) {
   }
 
   return root;
+}
+
+async function runMcpSession(designSystemDir, requests) {
+  const child = spawn(process.execPath, ['src/cli.mjs', 'mcp', '--design-system', designSystemDir], {
+    cwd: path.resolve(import.meta.dirname, '..'),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+
+  for (const request of requests) {
+    child.stdin.write(`${JSON.stringify(request)}\n`);
+  }
+  child.stdin.end();
+
+  const exitCode = await new Promise((resolve) => {
+    child.on('close', resolve);
+  });
+
+  assert.equal(exitCode, 0, stderr);
+  return stdout
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+function parseToolText(response) {
+  assert.equal(response.result.content[0].type, 'text');
+  return JSON.parse(response.result.content[0].text);
 }
 
 async function makeDesignSystemArtifacts(root) {
@@ -1208,6 +1296,28 @@ async function makeDesignSystemArtifacts(root) {
       status: 'approved',
       commonClasses,
       variantClasses: [],
+      deprecatedClasses: [
+        'block',
+        'w-full',
+        'rounded',
+        'border',
+        'border-neutral-300',
+        'px-3',
+        'py-2',
+        'text-sm',
+        'shadow-sm',
+        'focus:border-red-500',
+        'focus:ring-red-500',
+      ],
+      elementTags: ['input'],
+      usageExample: {
+        file: 'src/Approved.tsx',
+        line: 1,
+        column: 1,
+        element: 'input',
+        sourceType: 'className',
+        snippet: '<input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />',
+      },
       referenceLocations: [{ file: 'src/Approved.tsx', line: 1, column: 1, element: 'input' }],
     },
   ], null, 2)}\n`, 'utf8');

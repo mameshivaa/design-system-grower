@@ -6,6 +6,7 @@ import { runDesignSystemCheck } from './check.js';
 import { saveDecision, VALID_ACTIONS, writeAssetArtifacts } from './decision-actions.js';
 import { buildAgentRulesMarkdown } from './decisions.js';
 import { runInit } from './init.js';
+import { startMcpServer } from './mcp-server.js';
 import { openReviewUrl, startReviewServer } from './review-server.js';
 
 export async function main(argv = process.argv.slice(2), streams = process) {
@@ -68,6 +69,13 @@ export async function main(argv = process.argv.slice(2), streams = process) {
     return runInit(options, streams);
   }
 
+  if (options.command === 'mcp') {
+    await startMcpServer({
+      designSystem: options.designSystem,
+    }, streams);
+    return 0;
+  }
+
   if (options.command === 'review') {
     const artifactsDir = path.resolve(options.target ?? path.join(process.cwd(), 'design-system'));
     const review = await startReviewServer({
@@ -107,7 +115,7 @@ export async function main(argv = process.argv.slice(2), streams = process) {
 
 export function parseArgs(argv) {
   const options = {};
-  const knownCommands = new Set(['scan', 'init', 'instruct', 'decide', 'review', 'install-instructions', 'check']);
+  const knownCommands = new Set(['scan', 'init', 'instruct', 'decide', 'review', 'install-instructions', 'check', 'mcp']);
   const command = knownCommands.has(argv[0]) ? argv[0] : 'scan';
   const args = knownCommands.has(argv[0]) ? argv.slice(1) : argv;
   options.command = command;
@@ -247,6 +255,10 @@ export function parseArgs(argv) {
       throw new Error(`Unexpected argument: ${arg}`);
     }
 
+    if (command === 'mcp') {
+      throw new Error(`Unexpected argument: ${arg}`);
+    }
+
     if (options.target) {
       throw new Error(`Unexpected argument: ${arg}`);
     }
@@ -269,6 +281,10 @@ export function parseArgs(argv) {
     if (!options.designSystem) {
       throw new Error('check requires --design-system <artifacts-dir>');
     }
+  }
+
+  if (command === 'mcp' && !options.designSystem) {
+    throw new Error('mcp requires --design-system <artifacts-dir>');
   }
 
   return options;
@@ -337,6 +353,7 @@ export function helpText() {
     '  design-system-grower instruct [design-system-dir]',
     '  design-system-grower decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--strict] [--report out.md]',
+    '  design-system-grower mcp --design-system <artifacts-dir>',
     '  design-system-grower review [design-system-dir] [--port 4173] [--no-open]',
     '  design-system-grower install-instructions [design-system-dir] [--agents-out AGENTS.md] [--claude-out CLAUDE.md]',
     '  node src/cli.mjs init [target-dir] [--design-system <dir>] [--no-open]',
@@ -344,6 +361,7 @@ export function helpText() {
     '  node src/cli.mjs instruct [design-system-dir]',
     '  node src/cli.mjs decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  node src/cli.mjs check <repo-path> --design-system <artifacts-dir>',
+    '  node src/cli.mjs mcp --design-system <artifacts-dir>',
     '  node src/cli.mjs review [design-system-dir] [--no-open]',
     '  node src/cli.mjs install-instructions [design-system-dir] [--force]',
     '',
