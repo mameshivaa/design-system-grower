@@ -16,9 +16,10 @@ The fix isn't another component library. Your repo already *has* a design system
 ## What it does
 
 ```bash
-npx design-system-grower scan . --out design-system/catalog.json
-npx design-system-grower review design-system
+npx design-system-grower init .
 ```
+
+One command: scans your repo, prints what your UI has converged into, opens the local promotion board, and tells you the exact next commands. (Prefer separate steps? `dsg scan` / `dsg review` still work.)
 
 1. **Scan** (read-only, no network, zero runtime dependencies): extracts `className`, `cn(...)`, and `cva(...)` patterns from `.js/.jsx/.ts/.tsx`, weights classes by repo-level distinctiveness, and clusters real repeated patterns — generic utility co-occurrence (`flex items-center gap-2`) is filtered out, and your existing `components/ui/*` are treated as inventory, not re-discovered.
 2. **Review**: a local promotion board (top candidates, source snippets, one-click approval) shows what your UI has actually converged into.
@@ -48,6 +49,11 @@ dsg check . --design-system design-system --report drift.md
 ```
 
 See [docs/check.md](docs/check.md) for CI integration examples.
+
+## Two layers of agent guidance
+
+- **Static rules** (`AGENTS.md` / `CLAUDE.md`): a compact, always-in-context summary of your approved assets.
+- **MCP server** (`dsg mcp --design-system design-system`): on-demand detail. Agents can call `lookup_pattern` ("is there an alert style here?"), `check_classes` (canonical / near-miss / deprecated verdict for a class list), and `list_assets` while they code. Zero dependencies, stdio transport. Setup: [docs/mcp.md](docs/mcp.md).
 
 ## Measured, not promised
 

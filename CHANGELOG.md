@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.0 (2026-07-08)
+
+Theme: five-minute onboarding and live agent access.
+
+### `dsg init` — one-command onboarding
+
+- `dsg init [target]` scans, prints a human summary (files, candidates, drift count, top-3 candidates with suggested names), opens the review board, and prints copy-paste next steps (`decide` / `install-instructions` / `check`) on exit.
+- Re-running `init` preserves previously approved decisions.
+
+### `dsg mcp` — MCP server for coding agents
+
+- `dsg mcp --design-system <dir>`: dependency-free MCP server (stdio, newline-delimited JSON-RPC 2.0).
+- Tools: `list_assets`, `lookup_pattern` (rank approved assets by class/keyword match), `check_classes` (canonical / near-miss / deprecated verdict with class diff, reusing the `dsg check` engine).
+- Artifacts are re-read per call, so decisions made while the server runs are picked up immediately. Setup examples in docs/mcp.md.
+- Complements static `AGENTS.md` rules: compact summary always in context, details on demand.
+
 ## v0.2.0 (2026-07-08)
 
 Theme: declare the canonical, then enforce it.
