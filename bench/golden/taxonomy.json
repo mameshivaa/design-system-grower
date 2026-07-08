@@ -1,0 +1,15 @@
+{
+  "repo": "taxonomy",
+  "topN": 20,
+  "minPrecision": 1,
+  "maxNoise": 0,
+  "expectedTop": [
+    ["bg-background", "border", "rounded-lg", "p-2"],
+    ["font-heading"],
+    ["px-1", "text-red-600", "text-xs"]
+  ],
+  "notExpected": [
+    ["h-4", "w-4"],
+    ["flex", "items-center", "gap-2"]
+  ]
+}

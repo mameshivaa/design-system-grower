@@ -1,0 +1,11 @@
+[
+  {
+    "id": "taxonomy",
+    "name": "shadcn-ui/taxonomy",
+    "url": "https://github.com/shadcn-ui/taxonomy.git",
+    "ref": "main",
+    "sha": "651f984e52edd65d40ccd55e299c1baeea3ff017",
+    "golden": "bench/golden/taxonomy.json",
+    "offlinePath": "bench/offline/taxonomy"
+  }
+]
