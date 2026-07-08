@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.2.0 (2026-07-08)
+
+Theme: declare the canonical, then enforce it.
+
+### Drift detection (`canonicalize`)
+
+- The scan now detects **competing pattern families**: same structure, same element, but swapped synonym color families (green/emerald, gray/slate/zinc/neutral/stone, red/rose, yellow/amber, blue/sky, violet/purple, teal/cyan). Cross-group color differences (slate vs red) are treated as intentional tone variants and never flagged.
+- New decision action: `dsg decide <dir> <id> canonicalize --name X --side N` records the winner and marks the losing family as deprecated in `assets.json` (`deprecatedClasses`) and `agent-rules.md`.
+- The review board shows drift candidates as comparison cards with per-side usage counts and a recommended winner.
+- Measured on a 903-file production app: 4 drift candidates, 4/4 genuine (rose/red alerts, amber/yellow badges).
+
+### `dsg check` — CI drift gate
+
+- `dsg check <repo> --design-system <dir> [--files ...] [--strict] [--report out.md]`
+- Reports **near-misses** (class set ≥0.6 similar to an approved signature but not equal, with missing/extra class diff) and **deprecated-family usage** (from canonicalize decisions), each with file:line.
+- `--strict` exits 1 for CI; `--report` emits PR-comment markdown. See docs/check.md.
+
+### Precision bench harness
+
+- `node scripts/bench.mjs` clones a pinned `shadcn-ui/taxonomy`, scans it, and compares top candidates against golden expectations (`bench/golden/`); fails on precision regression. Scheduled + manual GitHub Actions workflow (`bench.yml`).
+
 ## v0.1.0 (2026-07-08)
 
 First public-ready cut of `design-system-grower`: a repo-first CLI that finds repeated UI patterns in React/TypeScript codebases and turns them into an agent-ready design-system catalog.

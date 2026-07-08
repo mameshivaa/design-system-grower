@@ -30,6 +30,25 @@ dsg decide design-system candidate-001 reuse --name FormInput
 dsg install-instructions design-system --agents-out AGENTS.md --claude-out CLAUDE.md
 ```
 
+## Declare the canonical, then enforce it
+
+When your repo has *competing* versions of the same pattern (a `rose-*` alert here, a `red-*` alert there), the scan surfaces them as drift candidates — same structure, synonym color families — and you pick the winner:
+
+```bash
+dsg decide design-system candidate-220 canonicalize --name AlertNotice --side 1
+# agent-rules.md now says: use AlertNotice (rose-*); the red-* family is
+# deprecated — do not use it in new code.
+```
+
+Then gate it in CI. `dsg check` scans new code against your approved assets and reports **near-misses** (one class off an approved signature) and **deprecated-family usage**, with exact file:line and class diffs:
+
+```bash
+dsg check . --design-system design-system --strict   # exit 1 on drift
+dsg check . --design-system design-system --report drift.md
+```
+
+See [docs/check.md](docs/check.md) for CI integration examples.
+
 ## Measured, not promised
 
 Validated on real repositories (2026-07):
