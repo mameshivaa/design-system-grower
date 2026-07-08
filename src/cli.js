@@ -5,6 +5,7 @@ import { buildCatalog, writeCatalog, writeDesignSystemArtifacts } from './catalo
 import { runDesignSystemCheck } from './check.js';
 import { saveDecision, VALID_ACTIONS, writeAssetArtifacts } from './decision-actions.js';
 import { buildAgentRulesMarkdown } from './decisions.js';
+import { buildDiagnosis, regenerateDiagnosis } from './diagnosis.js';
 import { installClaudeHooks, runHookCheck } from './hooks.js';
 import { runInit } from './init.js';
 import { startMcpServer } from './mcp-server.js';
@@ -87,6 +88,13 @@ export async function main(argv = process.argv.slice(2), streams = process) {
     return runInit(options, streams);
   }
 
+  if (options.command === 'diagnose') {
+    const artifactsDir = path.resolve(options.target ?? path.join(process.cwd(), 'design-system'));
+    const diagnosis = await regenerateDiagnosis(artifactsDir);
+    streams.stdout.write(`${diagnosis.text}Wrote diagnosis to ${diagnosis.outputPath}\n`);
+    return 0;
+  }
+
   if (options.command === 'mcp') {
     await startMcpServer({
       designSystem: options.designSystem,
@@ -131,13 +139,15 @@ export async function main(argv = process.argv.slice(2), streams = process) {
     ...roleLines,
     `Artifacts: ${artifactsDir}`,
     '',
+    buildDiagnosis(catalog).text.trimEnd(),
+    '',
   ].join('\n'));
   return 0;
 }
 
 export function parseArgs(argv) {
   const options = {};
-  const knownCommands = new Set(['scan', 'init', 'instruct', 'decide', 'review', 'install-instructions', 'check', 'hook-check', 'install-hooks', 'mcp']);
+  const knownCommands = new Set(['scan', 'init', 'diagnose', 'instruct', 'decide', 'review', 'install-instructions', 'check', 'hook-check', 'install-hooks', 'mcp']);
   const command = knownCommands.has(argv[0]) ? argv[0] : 'scan';
   const args = knownCommands.has(argv[0]) ? argv.slice(1) : argv;
   options.command = command;
@@ -281,7 +291,7 @@ export function parseArgs(argv) {
       throw new Error(`Unexpected argument: ${arg}`);
     }
 
-    if (command === 'install-instructions' || command === 'review' || command === 'check' || command === 'init') {
+    if (command === 'install-instructions' || command === 'review' || command === 'check' || command === 'init' || command === 'diagnose') {
       if (!options.target) {
         options.target = arg;
         continue;
@@ -388,6 +398,7 @@ export function helpText() {
     'Usage:',
     '  design-system-grower init [target-dir] [--design-system <dir>] [--port 4173] [--no-open]',
     '  design-system-grower scan [target-dir] --out catalog.json',
+    '  design-system-grower diagnose [design-system-dir]',
     '  design-system-grower instruct [design-system-dir]',
     '  design-system-grower decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--base <git-ref>] [--strict] [--report out.md]',
@@ -398,6 +409,7 @@ export function helpText() {
     '  design-system-grower install-instructions [design-system-dir] [--agents-out AGENTS.md] [--claude-out CLAUDE.md]',
     '  node src/cli.mjs init [target-dir] [--design-system <dir>] [--no-open]',
     '  node src/cli.mjs scan [target-dir] --out catalog.json',
+    '  node src/cli.mjs diagnose [design-system-dir]',
     '  node src/cli.mjs instruct [design-system-dir]',
     '  node src/cli.mjs decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  node src/cli.mjs check <repo-path> --design-system <artifacts-dir>',

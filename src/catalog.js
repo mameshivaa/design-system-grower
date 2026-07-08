@@ -10,6 +10,7 @@ import {
   buildInitialDecisions,
   buildReviewHtml,
 } from './decisions.js';
+import { buildDiagnosis } from './diagnosis.js';
 import { analyzeSource } from './extractor.js';
 import { buildInventory, isExistingDesignSystemSource } from './inventory.js';
 import { summarizeRoles } from './roles.js';
@@ -92,6 +93,7 @@ export async function writeDesignSystemArtifacts(catalog, outputDir, options = {
     ['assets.md', buildAssetsMarkdown(assets)],
     ['decisions.md', buildDecisionsMarkdown(catalog)],
     ['agent-rules.md', buildAgentRulesMarkdown(catalog, decisions)],
+    ['diagnosis.md', buildDiagnosis(catalog).markdown],
     ['review.html', buildReviewHtml(catalog)],
   ];
 

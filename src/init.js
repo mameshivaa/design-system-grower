@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { buildCatalog, writeCatalog, writeDesignSystemArtifacts } from './catalog.js';
+import { buildDiagnosis } from './diagnosis.js';
 import { openReviewUrl, startReviewServer } from './review-server.js';
 import { roleSummaryLines } from './roles.js';
 
@@ -60,7 +61,7 @@ export function buildInitSummary(catalog, artifactsDir) {
   }
 
   lines.push('');
-  return `${lines.join('\n')}\n`;
+  return `${lines.join('\n')}\n${buildDiagnosis(catalog).text}\n`;
 }
 
 export function buildNextSteps(catalog, artifactsDir) {
