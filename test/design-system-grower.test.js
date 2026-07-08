@@ -138,6 +138,40 @@ test('buildCatalog excludes cn template condition identifiers from candidate com
   assert.ok(!commonClasses.includes('isOpen'));
 });
 
+test('buildCatalog excludes comparison-operand string literals from template classes', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/ToneNotice.tsx': `
+      export function ToneNotice({ message }) {
+        return <>
+          <div className={\`rounded-md border px-3 py-2 text-sm \${
+            message.tone === "error"
+              ? "border-red-200 bg-red-50"
+              : message.tone === "success"
+                ? "border-emerald-200 bg-emerald-50"
+                : "border-slate-200 bg-slate-50"
+          }\`} />
+          <div className={\`rounded-md border px-3 py-2 text-sm \${
+            message.tone === "error"
+              ? "border-red-200 bg-red-50"
+              : message.tone === "success"
+                ? "border-emerald-200 bg-emerald-50"
+                : "border-slate-200 bg-slate-50"
+          }\`} />
+        </>;
+      }
+    `,
+  });
+
+  const catalog = await buildCatalog(fixtureDir);
+  const commonClasses = catalog.candidates[0].commonClasses;
+
+  assert.ok(commonClasses.includes('border-red-200'));
+  assert.ok(commonClasses.includes('bg-emerald-50'));
+  assert.ok(commonClasses.includes('border-slate-200'));
+  assert.ok(!commonClasses.includes('error'));
+  assert.ok(!commonClasses.includes('success'));
+});
+
 test('buildCatalog merges near-duplicate class clusters before building candidates', async () => {
   const fixtureDir = await makeFixtureRepo({
     'src/Form.tsx': `

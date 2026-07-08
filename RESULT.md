@@ -1,18 +1,15 @@
-# 作業報告
+実装完了し、コミットしました。
 
-## 実装内容
+コミット: `7d28d35 Fix precision candidate bugs`
 
-- `src/extractor.js` の `cn()` 引数内テンプレートリテラル抽出を修正し、`${error ? ... : ...}` や `${isOpen ? ... : ...}` の条件識別子を class token として扱わないようにしました。
-- `src/cluster.js` の Jaccard マージ比較を、variant で膨らんだ全クラス union ではなく、グループ内の共通クラス集合を優先して比較するようにしました。これにより候補生成前に高類似クラスタが actionType に関係なく統合されます。
-- `test/design-system-grower.test.js` に再現テストを2件追加しました。
+対応内容:
+- `cn()` 内テンプレートリテラルの条件識別子 `error` / `isOpen` などが `commonClasses` に混入しないよう修正
+- Jaccard マージを共通クラス集合ベースに寄せ、actionType 判定前に高類似クラスタを統合
+- 再現テスト2件を追加
+- `RESULT.md` に作業報告を作成
 
-## 検証
-
+検証:
 - `npm test` 通過
-- 結果: 23件 pass / 0件 fail
+- `23件 pass / 0件 fail`
 
-## 注意
-
-- README.md は変更していません。
-- 外部 runtime 依存は追加していません。
-- `candidates.json` スキーマのフィールド名は変更していません。
+`README.md` は変更していません。`TASK.md` は入力指示ファイルとして未追跡のまま残しています。
