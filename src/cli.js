@@ -6,6 +6,7 @@ import { runDesignSystemCheck } from './check.js';
 import { saveDecision, VALID_ACTIONS, writeAssetArtifacts } from './decision-actions.js';
 import { buildAgentRulesMarkdown } from './decisions.js';
 import { buildDiagnosis, regenerateDiagnosis } from './diagnosis.js';
+import { runExtract } from './extract.js';
 import { installClaudeHooks, runHookCheck } from './hooks.js';
 import { runInit } from './init.js';
 import { startMcpServer } from './mcp-server.js';
@@ -96,6 +97,17 @@ export async function main(argv = process.argv.slice(2), streams = process) {
     return 0;
   }
 
+  if (options.command === 'extract') {
+    const result = await runExtract({
+      designSystemDir: options.target,
+      assetId: options.assetId,
+      outDir: options.output,
+      force: options.force,
+    });
+    streams.stdout.write(`Extracted ${result.assetId} to ${result.outputPath}\n`);
+    return 0;
+  }
+
   if (options.command === 'mcp') {
     await startMcpServer({
       designSystem: options.designSystem,
@@ -148,7 +160,7 @@ export async function main(argv = process.argv.slice(2), streams = process) {
 
 export function parseArgs(argv) {
   const options = {};
-  const knownCommands = new Set(['scan', 'init', 'diagnose', 'instruct', 'decide', 'review', 'install-instructions', 'check', 'hook-check', 'install-hooks', 'mcp']);
+  const knownCommands = new Set(['scan', 'init', 'diagnose', 'extract', 'instruct', 'decide', 'review', 'install-instructions', 'check', 'hook-check', 'install-hooks', 'mcp']);
   const command = knownCommands.has(argv[0]) ? argv[0] : 'scan';
   const args = knownCommands.has(argv[0]) ? argv.slice(1) : argv;
   options.command = command;
@@ -297,6 +309,18 @@ export function parseArgs(argv) {
       throw new Error(`Unexpected argument: ${arg}`);
     }
 
+    if (command === 'extract') {
+      if (!options.target) {
+        options.target = arg;
+        continue;
+      }
+      if (!options.assetId) {
+        options.assetId = arg;
+        continue;
+      }
+      throw new Error(`Unexpected argument: ${arg}`);
+    }
+
     if (command === 'install-instructions' || command === 'review' || command === 'check' || command === 'init' || command === 'diagnose') {
       if (!options.target) {
         options.target = arg;
@@ -330,6 +354,12 @@ export function parseArgs(argv) {
     }
     if (!options.designSystem) {
       throw new Error('check requires --design-system <artifacts-dir>');
+    }
+  }
+
+  if (command === 'extract') {
+    if (!options.target || !options.assetId) {
+      throw new Error('extract requires: <design-system-dir> <asset-id>');
     }
   }
 
@@ -405,6 +435,7 @@ export function helpText() {
     '  design-system-grower init [target-dir] [--design-system <dir>] [--port 4173] [--no-open]',
     '  design-system-grower scan [target-dir] --out catalog.json',
     '  design-system-grower diagnose [design-system-dir]',
+    '  design-system-grower extract <design-system-dir> <asset-id> [--out components/ui] [--force]',
     '  design-system-grower instruct [design-system-dir]',
     '  design-system-grower decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--base <git-ref>] [--strict] [--blame] [--report out.md]',
@@ -416,6 +447,7 @@ export function helpText() {
     '  node src/cli.mjs init [target-dir] [--design-system <dir>] [--no-open]',
     '  node src/cli.mjs scan [target-dir] --out catalog.json',
     '  node src/cli.mjs diagnose [design-system-dir]',
+    '  node src/cli.mjs extract <design-system-dir> <asset-id> [--out components/ui] [--force]',
     '  node src/cli.mjs instruct [design-system-dir]',
     '  node src/cli.mjs decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  node src/cli.mjs check <repo-path> --design-system <artifacts-dir>',
@@ -426,7 +458,7 @@ export function helpText() {
     '  node src/cli.mjs install-instructions [design-system-dir] [--force]',
     '',
     'Options:',
-    '  -o, --out <path>           Write JSON catalog to path',
+    '  -o, --out <path>           Write JSON catalog to path, or extract component output directory',
     '  --artifacts-dir <path>     Write inventory, situations, candidates, decisions, assets, agent rules, and review HTML',
     '  --design-system <path>     Read approved design-system artifacts for check',
     '  --files <glob,glob>        Limit check to comma-separated files or simple globs',
