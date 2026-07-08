@@ -3,6 +3,7 @@ import path from 'node:path';
 import { buildApprovedAssets, buildAssetsMarkdown } from './assets.js';
 import { buildCandidates } from './candidates.js';
 import { clusterClassNameMatches } from './cluster.js';
+import { detectCompetingFamilies } from './drift.js';
 import {
   buildAgentRulesMarkdown,
   buildDecisionsMarkdown,
@@ -42,9 +43,10 @@ export async function buildCatalog(targetDir, options = {}) {
   const clusters = clusterClassNameMatches(elements, {
     minimumOccurrences: options.minimumOccurrences,
   });
+  const competingFamilies = detectCompetingFamilies(elements);
   const inventory = buildInventory(analyses);
   const situations = diagnoseSituations(inventory, clusters);
-  const candidates = buildCandidates(clusters, situations);
+  const candidates = buildCandidates(clusters, situations, competingFamilies);
 
   return {
     schemaVersion: 1,
@@ -56,11 +58,13 @@ export async function buildCatalog(targetDir, options = {}) {
       duplicateClusters: clusters.length,
       situations: situations.length,
       candidates: candidates.length,
+      competingFamilies: competingFamilies.length,
     },
     inventory,
     situations,
     candidates,
     clusters,
+    competingFamilies,
   };
 }
 

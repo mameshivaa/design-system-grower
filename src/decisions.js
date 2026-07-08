@@ -30,6 +30,12 @@ export function buildDecisionsMarkdown(catalog) {
       lines.push(`  - Suggested asset name: ${assetNameForReview(candidate)}`);
       lines.push(`  - Safety: ${candidate.safetyLevel}`);
       lines.push(`  - Occurrences: ${candidate.source.occurrences} across ${candidate.source.files} files`);
+      if (candidate.actionType === 'canonicalize' && candidate.sides?.length) {
+        lines.push(`  - Recommended canonical side: ${candidate.recommendedSide}`);
+        for (const side of candidate.sides) {
+          lines.push(`  - Side ${side.side}: ${side.occurrences} uses, \`${side.classes.join(' ')}\``);
+        }
+      }
       lines.push(`  - Approve command: \`${decideCommandFor(candidate)}\``);
       lines.push(`  - Decision: undecided`);
     }
@@ -47,6 +53,8 @@ export function buildInitialDecisions(catalog) {
     userDecision: null,
     status: 'needs-decision',
     safetyLevel: candidate.safetyLevel,
+    ...(candidate.driftId ? { driftId: candidate.driftId } : {}),
+    ...(candidate.recommendedSide ? { recommendedSide: candidate.recommendedSide } : {}),
   }));
 }
 
@@ -89,6 +97,12 @@ export function buildAgentRulesMarkdown(catalog, decisions = buildInitialDecisio
       }
       if (candidate.commonClasses.length > 0) {
         lines.push(`- Common classes: \`${candidate.commonClasses.join(' ')}\``);
+      }
+      if (decision.canonicalClasses?.length) {
+        lines.push(`- Canonical classes: \`${decision.canonicalClasses.join(' ')}\``);
+      }
+      if (decision.deprecatedClasses?.length) {
+        lines.push(`- Deprecated classes: \`${decision.deprecatedClasses.join(' ')}\``);
       }
       if (candidate.variantClasses.length > 0) {
         lines.push(`- Variant classes: \`${candidate.variantClasses.join(' ')}\``);
@@ -162,11 +176,29 @@ function agentRuleFor(candidate, decision) {
       return `Treat ${assetName} as a domain/product block candidate and avoid recreating it inline.`;
     case 'document-rule':
       return `Follow ${assetName} as the documented local UI rule; do not make a code change unless the user asks.`;
+    case 'canonicalize':
+      return canonicalizeRuleFor(assetName, candidate, decision);
     case 'unsupported':
       return `Observe ${assetName} only. Do not migrate or rewrite this unsupported styling/library signal without explicit user approval.`;
     default:
       return `Follow approved decision \`${action}\` for ${candidate.id}.`;
   }
+}
+
+function canonicalizeRuleFor(assetName, candidate, decision) {
+  const canonicalClasses = decision.canonicalClasses ?? canonicalSideFor(candidate, decision)?.classes ?? [];
+  const deprecatedClasses = decision.deprecatedClasses ?? deprecatedSidesFor(candidate, decision).flatMap((side) => side.classes);
+  return `Use ${assetName} (${canonicalClasses.join(' ')}). The ${deprecatedClasses.join(' ')} family is deprecated — do not use it in new code.`;
+}
+
+function canonicalSideFor(candidate, decision) {
+  const sideNumber = decision.canonicalSide?.side ?? decision.canonicalSide ?? candidate.recommendedSide;
+  return candidate.sides?.find((side) => side.side === sideNumber);
+}
+
+function deprecatedSidesFor(candidate, decision) {
+  const canonical = canonicalSideFor(candidate, decision);
+  return candidate.sides?.filter((side) => side.side !== canonical?.side) ?? [];
 }
 
 export function buildReviewHtml(catalog) {
@@ -206,6 +238,10 @@ export function buildReviewHtml(catalog) {
     strong { color: #18181b; }
     .stack { display: grid; gap: 12px; }
     .card { padding: 16px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; }
+    .card.drift-card { border-color: #f59e0b; background: #fffbeb; }
+    .side-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .side-panel { padding: 10px; border: 1px solid #fde68a; border-radius: 6px; background: #fff; }
+    .side-panel.recommended { border-color: #18181b; }
     .candidate-group { display: grid; gap: 10px; }
     .group-heading { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; font-size: 13px; color: #27272a; }
     .badge { display: inline-flex; align-items: center; border: 1px solid #d4d4d8; border-radius: 999px; padding: 1px 8px; color: #52525b; font-size: 12px; background: #fff; }
@@ -223,7 +259,7 @@ export function buildReviewHtml(catalog) {
     .button.primary { border-color: #18181b; background: #18181b; color: #fff; }
     .button:disabled { cursor: default; opacity: .6; }
     .command-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
-    .decide-form { display: grid; grid-template-columns: minmax(120px, 180px) minmax(140px, 1fr) auto; gap: 8px; margin-top: 8px; }
+    .decide-form { display: grid; grid-template-columns: minmax(120px, 180px) minmax(140px, 1fr) minmax(72px, 90px) auto; gap: 8px; margin-top: 8px; }
     .decide-form input, .decide-form select { min-width: 0; border: 1px solid #d4d4d8; border-radius: 6px; padding: 6px 8px; background: #fff; }
     .snippet { overflow: auto; max-height: 180px; border: 1px solid #e4e4e7; border-radius: 6px; background: #fafafa; }
     .snippet code { display: grid; gap: 0; padding: 8px 0; background: transparent; }
@@ -281,6 +317,10 @@ function renderCandidateGroups(candidates, allCandidates = candidates) {
 }
 
 function renderCandidateCard(candidate) {
+  if (candidate.actionType === 'canonicalize') {
+    return renderDriftCandidateCard(candidate);
+  }
+
   const command = decideCommandFor(candidate);
   return `
     <article class="card candidate-card" data-candidate-id="${escapeHtml(candidate.id)}" data-example-index="0">
@@ -299,6 +339,7 @@ function renderCandidateCard(candidate) {
           ${DECISION_ACTIONS.map((action) => `<option value="${escapeHtml(action)}"${action === candidate.recommendedAction ? ' selected' : ''}>${escapeHtml(action)}</option>`).join('')}
         </select>
         <input name="assetName" aria-label="Asset name" value="${escapeHtml(assetNameForReview(candidate))}">
+        <input name="side" aria-label="Canonical side" value="" hidden>
         <button class="button primary" type="submit">Approve</button>
       </form>
       <p class="status-message" role="status"></p>
@@ -310,6 +351,46 @@ function renderCandidateCard(candidate) {
       <code>${escapeHtml(candidate.commonClasses.join(' ') || 'none')}</code>
       <h3>Variant classes</h3>
       <code>${escapeHtml(candidate.variantClasses.join(' ') || 'none')}</code>
+      <h3>Source locations</h3>
+      ${renderExamples(candidate.source.examples)}
+    </article>
+  `;
+}
+
+function renderDriftCandidateCard(candidate) {
+  const command = decideCommandFor(candidate);
+  return `
+    <article class="card candidate-card drift-card" data-candidate-id="${escapeHtml(candidate.id)}" data-example-index="0">
+      <div class="meta">${escapeHtml(candidate.id)} / canonicalize / drift / ${escapeHtml(candidate.safetyLevel)} / <span class="score">score ${scoreFor(candidate)}</span></div>
+      <h2>${escapeHtml(candidate.title)}</h2>
+      <p>${escapeHtml(candidate.rationale)}</p>
+      <p><strong>${candidate.source.occurrences}</strong> occurrences across <strong>${candidate.source.files}</strong> files. Recommended side: <strong>${escapeHtml(candidate.recommendedSide)}</strong>.</p>
+      <div class="side-grid">
+        ${candidate.sides.map((side) => `
+          <section class="side-panel${side.side === candidate.recommendedSide ? ' recommended' : ''}">
+            <h3>Side ${side.side}${side.side === candidate.recommendedSide ? ' (recommended)' : ''}</h3>
+            <p><strong>${side.occurrences}</strong> uses across <strong>${side.files}</strong> files</p>
+            <code>${escapeHtml(side.classes.join(' '))}</code>
+            <p class="location">${escapeHtml(side.representativeSource.file)}:${side.representativeSource.line}:${side.representativeSource.column}</p>
+          </section>
+        `).join('')}
+      </div>
+      <h3>Approve canonical side</h3>
+      <div class="command-row">
+        <code>${escapeHtml(command)}</code>
+        <button class="button copy-command" type="button" data-command="${escapeHtml(command)}">Copy</button>
+      </div>
+      <form class="decide-form">
+        <select name="decision" aria-label="Decision">
+          ${DECISION_ACTIONS.map((action) => `<option value="${escapeHtml(action)}"${action === candidate.recommendedAction ? ' selected' : ''}>${escapeHtml(action)}</option>`).join('')}
+        </select>
+        <input name="assetName" aria-label="Asset name" value="${escapeHtml(assetNameForReview(candidate))}">
+        <input name="side" aria-label="Canonical side" value="${escapeHtml(candidate.recommendedSide)}">
+        <button class="button primary" type="submit">Approve</button>
+      </form>
+      <p class="status-message" role="status"></p>
+      <h3>Source snippet</h3>
+      <div class="snippet" data-snippet><code>Loading snippet...</code></div>
       <h3>Source locations</h3>
       ${renderExamples(candidate.source.examples)}
     </article>
@@ -394,7 +475,8 @@ function assetNameFor(candidate) {
 }
 
 function decideCommandFor(candidate) {
-  return 'dsg decide design-system ' + candidate.id + ' ' + candidate.recommendedAction + ' --name ' + assetNameFor(candidate);
+  const side = candidate.actionType === 'canonicalize' ? ' --side ' + candidate.recommendedSide : '';
+  return 'dsg decide design-system ' + candidate.id + ' ' + candidate.recommendedAction + ' --name ' + assetNameFor(candidate) + side;
 }
 
 function sortedReviewCandidates(candidates) {
@@ -444,6 +526,10 @@ function renderExamples(examples) {
 }
 
 function renderCandidateCard(candidate) {
+  if (candidate.actionType === 'canonicalize') {
+    return renderDriftCandidateCard(candidate);
+  }
+
   const command = decideCommandFor(candidate);
   const options = decisionActions.map((action) => '<option value="' + escapeHtml(action) + '"' + (action === candidate.recommendedAction ? ' selected' : '') + '>' + escapeHtml(action) + '</option>').join('');
   return '<article class="card candidate-card" data-candidate-id="' + escapeHtml(candidate.id) + '" data-example-index="0">' +
@@ -454,12 +540,38 @@ function renderCandidateCard(candidate) {
     '<h3>Recommended decision</h3>' +
     '<p>Approve as <strong>' + escapeHtml(candidate.recommendedAction) + '</strong> and name the asset <strong>' + escapeHtml(assetNameFor(candidate)) + '</strong>.</p>' +
     '<div class="command-row"><code>' + escapeHtml(command) + '</code><button class="button copy-command" type="button" data-command="' + escapeHtml(command) + '">Copy</button></div>' +
-    '<form class="decide-form"><select name="decision" aria-label="Decision">' + options + '</select><input name="assetName" aria-label="Asset name" value="' + escapeHtml(assetNameFor(candidate)) + '"><button class="button primary" type="submit">Approve</button></form>' +
+    '<form class="decide-form"><select name="decision" aria-label="Decision">' + options + '</select><input name="assetName" aria-label="Asset name" value="' + escapeHtml(assetNameFor(candidate)) + '"><input name="side" aria-label="Canonical side" value="" hidden><button class="button primary" type="submit">Approve</button></form>' +
     '<p class="status-message" role="status"></p>' +
     '<h3>Decision options</h3>' + renderDecisionOptions(candidate) +
     '<h3>Source snippet</h3><div class="snippet" data-snippet><code>Loading snippet...</code></div>' +
     '<h3>Common classes</h3><code>' + escapeHtml(((candidate.commonClasses || []).join(' ')) || 'none') + '</code>' +
     '<h3>Variant classes</h3><code>' + escapeHtml(((candidate.variantClasses || []).join(' ')) || 'none') + '</code>' +
+    '<h3>Source locations</h3>' + renderExamples(candidate.source && candidate.source.examples) +
+    '</article>';
+}
+
+function renderDriftCandidateCard(candidate) {
+  const command = decideCommandFor(candidate);
+  const options = decisionActions.map((action) => '<option value="' + escapeHtml(action) + '"' + (action === candidate.recommendedAction ? ' selected' : '') + '>' + escapeHtml(action) + '</option>').join('');
+  const sides = (candidate.sides || []).map((side) => (
+    '<section class="side-panel' + (side.side === candidate.recommendedSide ? ' recommended' : '') + '">' +
+    '<h3>Side ' + escapeHtml(side.side) + (side.side === candidate.recommendedSide ? ' (recommended)' : '') + '</h3>' +
+    '<p><strong>' + escapeHtml(side.occurrences) + '</strong> uses across <strong>' + escapeHtml(side.files) + '</strong> files</p>' +
+    '<code>' + escapeHtml((side.classes || []).join(' ')) + '</code>' +
+    '<p class="location">' + escapeHtml(side.representativeSource && side.representativeSource.file) + ':' + escapeHtml(side.representativeSource && side.representativeSource.line) + ':' + escapeHtml(side.representativeSource && side.representativeSource.column) + '</p>' +
+    '</section>'
+  )).join('');
+  return '<article class="card candidate-card drift-card" data-candidate-id="' + escapeHtml(candidate.id) + '" data-example-index="0">' +
+    '<div class="meta">' + escapeHtml(candidate.id) + ' / canonicalize / drift / ' + escapeHtml(candidate.safetyLevel) + ' / <span class="score">score ' + scoreFor(candidate) + '</span></div>' +
+    '<h2>' + escapeHtml(candidate.title) + '</h2>' +
+    '<p>' + escapeHtml(candidate.rationale) + '</p>' +
+    '<p><strong>' + escapeHtml(candidate.source && candidate.source.occurrences) + '</strong> occurrences across <strong>' + escapeHtml(candidate.source && candidate.source.files) + '</strong> files. Recommended side: <strong>' + escapeHtml(candidate.recommendedSide) + '</strong>.</p>' +
+    '<div class="side-grid">' + sides + '</div>' +
+    '<h3>Approve canonical side</h3>' +
+    '<div class="command-row"><code>' + escapeHtml(command) + '</code><button class="button copy-command" type="button" data-command="' + escapeHtml(command) + '">Copy</button></div>' +
+    '<form class="decide-form"><select name="decision" aria-label="Decision">' + options + '</select><input name="assetName" aria-label="Asset name" value="' + escapeHtml(assetNameFor(candidate)) + '"><input name="side" aria-label="Canonical side" value="' + escapeHtml(candidate.recommendedSide) + '"><button class="button primary" type="submit">Approve</button></form>' +
+    '<p class="status-message" role="status"></p>' +
+    '<h3>Source snippet</h3><div class="snippet" data-snippet><code>Loading snippet...</code></div>' +
     '<h3>Source locations</h3>' + renderExamples(candidate.source && candidate.source.examples) +
     '</article>';
 }
@@ -530,6 +642,7 @@ document.addEventListener('submit', async (event) => {
     candidateId: card.dataset.candidateId,
     decision: form.elements.decision.value,
     assetName: form.elements.assetName.value.trim(),
+    side: form.elements.side && form.elements.side.value ? Number(form.elements.side.value) : undefined,
   };
   button.disabled = true;
   status.textContent = 'Saving...';
@@ -609,6 +722,7 @@ const DECISION_ACTIONS = [
   'wrap',
   'extract-block',
   'document-rule',
+  'canonicalize',
   'ignore',
   'unsupported',
 ];
@@ -621,7 +735,8 @@ function renderDecisionOptions(candidate) {
 }
 
 function decideCommandFor(candidate) {
-  return `dsg decide design-system ${candidate.id} ${candidate.recommendedAction} --name ${assetNameForReview(candidate)}`;
+  const side = candidate.actionType === 'canonicalize' ? ` --side ${candidate.recommendedSide}` : '';
+  return `dsg decide design-system ${candidate.id} ${candidate.recommendedAction} --name ${assetNameForReview(candidate)}${side}`;
 }
 
 function assetNameForReview(candidate) {

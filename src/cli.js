@@ -34,6 +34,7 @@ export async function main(argv = process.argv.slice(2), streams = process) {
       candidateId: options.candidateId,
       decision: options.userDecision,
       assetName: options.assetName,
+      side: options.side,
     });
     streams.stdout.write(`Approved ${options.candidateId} as ${options.userDecision} and regenerated agent rules in ${artifactsDir}\n`);
     return 0;
@@ -203,6 +204,16 @@ export function parseArgs(argv) {
       continue;
     }
 
+    if (arg === '--side') {
+      const value = Number(requireValue(args, index, arg));
+      if (!Number.isInteger(value) || value < 1) {
+        throw new Error('--side must be a positive integer');
+      }
+      options.side = value;
+      index += 1;
+      continue;
+    }
+
     if (arg.startsWith('-')) {
       throw new Error(`Unknown option: ${arg}`);
     }
@@ -318,13 +329,13 @@ export function helpText() {
     'Usage:',
     '  design-system-grower scan [target-dir] --out catalog.json',
     '  design-system-grower instruct [design-system-dir]',
-    '  design-system-grower decide [design-system-dir] <candidate-id> <action> [--name AssetName]',
+    '  design-system-grower decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--strict] [--report out.md]',
     '  design-system-grower review [design-system-dir] [--port 4173] [--no-open]',
     '  design-system-grower install-instructions [design-system-dir] [--agents-out AGENTS.md] [--claude-out CLAUDE.md]',
     '  node src/cli.mjs scan [target-dir] --out catalog.json',
     '  node src/cli.mjs instruct [design-system-dir]',
-    '  node src/cli.mjs decide [design-system-dir] <candidate-id> <action> [--name AssetName]',
+    '  node src/cli.mjs decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  node src/cli.mjs check <repo-path> --design-system <artifacts-dir>',
     '  node src/cli.mjs review [design-system-dir] [--no-open]',
     '  node src/cli.mjs install-instructions [design-system-dir] [--force]',
@@ -337,6 +348,7 @@ export function helpText() {
     '  --strict                   Exit 1 from check when drift is found',
     '  --report <path>            Write a markdown check report',
     '  --name <AssetName>         Name the approved asset when using decide',
+    '  --side <n>                 Canonical side number when approving a canonicalize decision',
     '  --host <host>              Host for the local review server (default: 127.0.0.1)',
     '  --port <port>              Port for the local review server (default: 4173, 0 for random)',
     '  --no-open                  Do not open a browser for review',

@@ -9,6 +9,7 @@ export const VALID_ACTIONS = new Set([
   'wrap',
   'extract-block',
   'document-rule',
+  'canonicalize',
   'ignore',
   'unsupported',
 ]);
@@ -24,6 +25,7 @@ export async function saveDecision(artifactsDir, input) {
     input.candidateId,
     input.decision,
     input.assetName,
+    input.side,
   );
   await fs.writeFile(decisionsPath, `${JSON.stringify(updatedDecisions, null, 2)}\n`, 'utf8');
   await writeAssetArtifacts(resolvedArtifactsDir, catalog, updatedDecisions);
@@ -38,12 +40,13 @@ export async function writeAssetArtifacts(artifactsDir, catalog, decisions) {
   await fs.writeFile(path.join(artifactsDir, 'assets.md'), buildAssetsMarkdown(assets), 'utf8');
 }
 
-function approveDecision(catalog, decisions, candidateId, userDecision, assetName) {
+function approveDecision(catalog, decisions, candidateId, userDecision, assetName, side) {
   if (!VALID_ACTIONS.has(userDecision)) {
     throw new Error(`Unknown decision action: ${userDecision}`);
   }
 
-  if (!catalog.candidates.some((candidate) => candidate.id === candidateId)) {
+  const candidate = catalog.candidates.find((item) => item.id === candidateId);
+  if (!candidate) {
     throw new Error(`Unknown candidate: ${candidateId}`);
   }
 
@@ -53,11 +56,53 @@ function approveDecision(catalog, decisions, candidateId, userDecision, assetNam
   }
 
   const updated = decisions.slice();
+  const canonicalizeDecision = userDecision === 'canonicalize'
+    ? buildCanonicalizeDecision(candidate, side)
+    : {};
+
   updated[decisionIndex] = {
     ...updated[decisionIndex],
     userDecision,
     status: 'approved',
     ...(assetName ? { assetName } : {}),
+    ...canonicalizeDecision,
   };
   return updated;
+}
+
+function buildCanonicalizeDecision(candidate, side) {
+  if (!Array.isArray(candidate.sides) || candidate.sides.length < 2) {
+    throw new Error(`Candidate ${candidate.id} does not include competing sides`);
+  }
+
+  const canonicalSideNumber = side === undefined || side === null
+    ? candidate.recommendedSide
+    : Number(side);
+  if (!Number.isInteger(canonicalSideNumber)) {
+    throw new Error('--side must be an integer side number for canonicalize decisions');
+  }
+
+  const canonical = candidate.sides.find((candidateSide) => candidateSide.side === canonicalSideNumber);
+  if (!canonical) {
+    throw new Error(`Unknown side ${canonicalSideNumber} for ${candidate.id}`);
+  }
+
+  const deprecated = candidate.sides.filter((candidateSide) => candidateSide.side !== canonicalSideNumber);
+
+  return {
+    canonicalSide: {
+      side: canonical.side,
+      occurrences: canonical.occurrences,
+      classes: canonical.classes,
+      representativeSource: canonical.representativeSource,
+    },
+    deprecatedSides: deprecated.map((deprecatedSide) => ({
+      side: deprecatedSide.side,
+      occurrences: deprecatedSide.occurrences,
+      classes: deprecatedSide.classes,
+      representativeSource: deprecatedSide.representativeSource,
+    })),
+    canonicalClasses: canonical.classes,
+    deprecatedClasses: deprecated.flatMap((deprecatedSide) => deprecatedSide.classes),
+  };
 }

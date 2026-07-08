@@ -12,6 +12,8 @@ export function buildApprovedAssets(catalog, decisions = []) {
       const name = decision.assetName || defaultAssetName(candidate);
       const elementTags = uniqueValues(candidate.source.examples.map((example) => example.element));
       const usageExample = buildUsageExample(candidate.source.examples[0]);
+      const commonClasses = decision.canonicalClasses ?? candidate.commonClasses;
+      const deprecatedClasses = decision.deprecatedClasses ?? [];
       return {
         id: `asset-${candidate.id.replace(/^candidate-/, '')}`,
         name,
@@ -20,8 +22,9 @@ export function buildApprovedAssets(catalog, decisions = []) {
         safetyLevel: candidate.safetyLevel,
         status: 'approved',
         usageGuidance: usageGuidanceFor(name, candidate, decision.userDecision),
-        commonClasses: candidate.commonClasses,
+        commonClasses,
         variantClasses: candidate.variantClasses,
+        deprecatedClasses,
         elementTags,
         usageExample,
         referenceLocations: candidate.source.examples.map((example) => ({
@@ -57,6 +60,9 @@ export function buildAssetsMarkdown(assets) {
     }
     if (asset.variantClasses.length > 0) {
       lines.push(`- Variant classes: \`${asset.variantClasses.join(' ')}\``);
+    }
+    if (asset.deprecatedClasses.length > 0) {
+      lines.push(`- Deprecated classes: \`${asset.deprecatedClasses.join(' ')}\``);
     }
     if (asset.elementTags.length > 0) {
       lines.push(`- Elements: ${asset.elementTags.map((element) => `\`${element}\``).join(', ')}`);
@@ -145,6 +151,8 @@ function usageGuidanceFor(name, candidate, actionType) {
       return `Reuse ${name} before adding similar JSX.`;
     case 'document-rule':
       return `Follow ${name} as a documented UI rule.`;
+    case 'canonicalize':
+      return `Use ${name} as the canonical class family and avoid the deprecated competing family in new code.`;
     case 'unsupported':
       return `Keep ${name} observe-only until explicit migration work is approved.`;
     default:
