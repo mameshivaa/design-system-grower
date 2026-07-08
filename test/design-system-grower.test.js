@@ -2001,6 +2001,129 @@ test('extract preserves nested JSX boundaries exactly', async () => {
   assert.match(component, /<\/section>/);
 });
 
+test('extract propsifies self-closing root expression attributes', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': [
+      'export function Form({ promptInstructions, setPromptInstructions }) {',
+      '  return (',
+      '    <textarea',
+      '      className="mt-2 min-h-40 w-full rounded-md border"',
+      '      value={promptInstructions}',
+      '      onChange={(event) => setPromptInstructions(event.target.value.slice(0, 4000))}',
+      '      placeholder="例: 入力してください"',
+      '    />',
+      '  );',
+      '}',
+      '',
+    ].join('\n'),
+  });
+  const designSystemDir = await writeExtractAssets(fixtureDir, [{
+    id: 'asset-textarea',
+    name: 'AppTextarea',
+    variantClasses: [],
+    usageExample: { file: 'src/Form.tsx', line: 4, column: 7, element: 'textarea' },
+    referenceLocations: [{ file: 'src/Form.tsx', line: 4, column: 7, element: 'textarea' }],
+  }]);
+
+  await main(['extract', designSystemDir, 'asset-textarea'], {
+    stdout: { write: () => {} },
+  });
+
+  const component = await fs.readFile(path.join(fixtureDir, 'components/ui/app-textarea.jsx'), 'utf8');
+  assert.match(component, /export function AppTextarea\(props\)/);
+  assert.match(component, /className="mt-2 min-h-40 w-full rounded-md border"/);
+  assert.match(component, /placeholder="例: 入力してください"/);
+  assert.match(component, /\{\.\.\.props\}/);
+  assert.doesNotMatch(component, /promptInstructions/);
+  assert.doesNotMatch(component, /setPromptInstructions/);
+});
+
+test('extract keeps text-child roots as children props', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Badge.tsx': 'export function Badge() {\n  return <span className="inline-flex rounded px-2 py-1">Ready</span>;\n}\n',
+  });
+  const designSystemDir = await writeExtractAssets(fixtureDir, [{
+    id: 'asset-badge',
+    name: 'StatusBadge',
+    variantClasses: [],
+    usageExample: { file: 'src/Badge.tsx', line: 2, column: 10, element: 'span' },
+    referenceLocations: [{ file: 'src/Badge.tsx', line: 2, column: 10, element: 'span' }],
+  }]);
+
+  await main(['extract', designSystemDir, 'asset-badge'], {
+    stdout: { write: () => {} },
+  });
+
+  const component = await fs.readFile(path.join(fixtureDir, 'components/ui/status-badge.jsx'), 'utf8');
+  assert.match(component, /export function StatusBadge\(\{ children = "Ready" \} = \{\}\)/);
+  assert.match(component, /<span className="inline-flex rounded px-2 py-1">\{children\}<\/span>/);
+});
+
+test('extract leaves nested roots verbatim and reports unresolved identifiers', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Panel.tsx': [
+      'export function Panel({ title, body }) {',
+      '  return <section className="rounded border p-4">',
+      '    <header className="font-medium">{title}</header>',
+      '    <div className="mt-2 text-sm">{body}</div>',
+      '  </section>;',
+      '}',
+      '',
+    ].join('\n'),
+  });
+  const designSystemDir = await writeExtractAssets(fixtureDir, [{
+    id: 'asset-panel',
+    name: 'InfoPanel',
+    variantClasses: [],
+    usageExample: { file: 'src/Panel.tsx', line: 2, column: 10, element: 'section' },
+    referenceLocations: [{ file: 'src/Panel.tsx', line: 2, column: 10, element: 'section' }],
+  }]);
+
+  await main(['extract', designSystemDir, 'asset-panel'], {
+    stdout: { write: () => {} },
+  });
+
+  const component = await fs.readFile(path.join(fixtureDir, 'components/ui/info-panel.jsx'), 'utf8');
+  assert.match(component, /<header className="font-medium">\{title\}<\/header>/);
+  assert.match(component, /<div className="mt-2 text-sm">\{body\}<\/div>/);
+  assert.doesNotMatch(component, /\{\.\.\.props\}/);
+  assert.match(component, /\/\/ TODO: unresolved identifiers: body, title/);
+});
+
+test('extract normalizes lifted JSX indentation', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Deep.tsx': [
+      'export function Deep({ value }) {',
+      '  if (value) {',
+      '    return (',
+      '            <input',
+      '              className="block w-full rounded border px-3 py-2"',
+      '              value={value}',
+      '            />',
+      '    );',
+      '  }',
+      '  return null;',
+      '}',
+      '',
+    ].join('\n'),
+  });
+  const designSystemDir = await writeExtractAssets(fixtureDir, [{
+    id: 'asset-input',
+    name: 'DeepInput',
+    variantClasses: [],
+    usageExample: { file: 'src/Deep.tsx', line: 5, column: 15, element: 'input' },
+    referenceLocations: [{ file: 'src/Deep.tsx', line: 5, column: 15, element: 'input' }],
+  }]);
+
+  await main(['extract', designSystemDir, 'asset-input'], {
+    stdout: { write: () => {} },
+  });
+
+  const component = await fs.readFile(path.join(fixtureDir, 'components/ui/deep-input.jsx'), 'utf8');
+  assert.match(component, /\n    <input\n      className="block w-full rounded border px-3 py-2"\n      \{\.\.\.props\}\n    \/>/);
+  assert.doesNotMatch(component, /\n {12}<input/);
+});
+
 test('extract promotes variantClasses to a variant prop when class differences are clear', async () => {
   const fixtureDir = await makeFixtureRepo({
     'src/Buttons.tsx': [
