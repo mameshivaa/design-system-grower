@@ -34,6 +34,28 @@ test('extractJsxClassNames finds JSX elements with literal className strings', (
   assert.equal(matches[1].line, 4);
 });
 
+test('extractJsxClassNames keeps only static class strings from template expressions', () => {
+  const source = `
+    export function Field({ invalid, disabled }) {
+      return <input className={\`block w-full rounded border border-neutral-300 px-3 py-2 text-sm hover:border-neutral-400 data-[invalid=true]:border-red-500 \${invalid ? "border-red-500 focus:ring-red-500" : "focus:ring-neutral-300"} \${disabled ? 'opacity-50' : ''}\`} />;
+    }
+  `;
+
+  const matches = extractJsxClassNames(source, 'src/Field.tsx');
+  const classes = matches[0].classes;
+
+  assert.equal(matches.length, 1);
+  assert.ok(classes.includes('border-neutral-300'));
+  assert.ok(classes.includes('hover:border-neutral-400'));
+  assert.ok(classes.includes('data-[invalid=true]:border-red-500'));
+  assert.ok(classes.includes('border-red-500'));
+  assert.ok(classes.includes('focus:ring-red-500'));
+  assert.ok(classes.includes('focus:ring-neutral-300'));
+  assert.ok(classes.includes('opacity-50'));
+  assert.ok(classes.every((className) => !className.startsWith('"')));
+  assert.ok(classes.every((className) => !['${', ':', '?'].includes(className)));
+});
+
 test('buildCatalog scans source files and scores duplicated UI clusters', async () => {
   const fixtureDir = await makeFixtureRepo({
     'src/Button.tsx': `
@@ -68,6 +90,63 @@ test('buildCatalog scans source files and scores duplicated UI clusters', async 
   assert.equal(catalog.clusters[0].examples[0].element, 'button');
   assert.deepEqual(catalog.clusters[0].variantClasses, []);
   assert.ok(catalog.clusters[0].score > 0);
+});
+
+test('buildCatalog excludes template expression syntax tokens from candidate commonClasses', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Fields.tsx': `
+      export function Fields({ invalid }) {
+        return <>
+          <input className={\`block w-full rounded border border-neutral-300 px-3 py-2 text-sm hover:border-neutral-400 \${invalid ? "border-red-500 focus:ring-red-500" : "focus:ring-neutral-300"}\`} />
+          <input className={\`block w-full rounded border border-neutral-300 px-3 py-2 text-sm hover:border-neutral-400 \${invalid ? "border-red-500 focus:ring-red-500" : "focus:ring-neutral-300"}\`} />
+        </>;
+      }
+    `,
+  });
+
+  const catalog = await buildCatalog(fixtureDir);
+  const commonClasses = catalog.candidates[0].commonClasses;
+
+  assert.ok(commonClasses.includes('border-neutral-300'));
+  assert.ok(commonClasses.includes('hover:border-neutral-400'));
+  assert.ok(commonClasses.includes('focus:ring-neutral-300'));
+  assert.ok(commonClasses.every((className) => !className.startsWith('"')));
+  assert.ok(commonClasses.every((className) => !['${', ':', '?'].includes(className)));
+});
+
+test('buildCatalog merges near-duplicate class clusters before building candidates', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <>
+          <label className="block rounded-sm px-1 py-0.5 text-sm font-medium leading-none text-neutral-900 tracking-wide mb-2">Email</label>
+          <label className="block rounded-sm px-1 py-0.5 text-sm font-medium leading-none text-neutral-900 tracking-wide mb-2">Name</label>
+          <label className="block rounded-sm px-1 py-0.5 text-sm font-medium leading-none text-neutral-900 tracking-wide mb-1">Company</label>
+          <label className="block rounded-sm px-1 py-0.5 text-sm font-medium leading-none text-neutral-900 tracking-wide mb-1">Role</label>
+
+          <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
+          <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
+          <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />
+          <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />
+        </>;
+      }
+    `,
+  });
+
+  const catalog = await buildCatalog(fixtureDir);
+  const labelCandidates = catalog.candidates.filter((candidate) => (
+    candidate.source.examples.every((example) => example.element === 'label')
+  ));
+  const inputCandidates = catalog.candidates.filter((candidate) => (
+    candidate.source.examples.every((example) => example.element === 'input')
+  ));
+
+  assert.equal(labelCandidates.length, 1);
+  assert.equal(labelCandidates[0].source.occurrences, 4);
+  assert.equal(inputCandidates.length, 1);
+  assert.equal(inputCandidates[0].source.occurrences, 4);
+  assert.ok(inputCandidates[0].variantClasses.includes('focus:ring-blue-500'));
+  assert.ok(inputCandidates[0].variantClasses.includes('focus:ring-red-500'));
 });
 
 test('extractClassCompositionCalls reads static classes from cn calls', () => {

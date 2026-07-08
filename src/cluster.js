@@ -9,17 +9,15 @@ import {
 
 export function clusterClassNameMatches(matches, options = {}) {
   const minimumOccurrences = options.minimumOccurrences ?? 2;
+  const mergeJaccardThreshold = options.mergeJaccardThreshold ?? 0.8;
   const classWeights = buildClassWeights(matches);
   const exactGroups = groupBySignature(matches);
-  const exactClusters = [];
+  const clusterGroups = [];
   const similarBuckets = new Map();
 
   for (const group of exactGroups.values()) {
     if (group.length >= minimumOccurrences) {
-      const cluster = buildCluster('exact', group[0].signature, group, classWeights);
-      if (passesClusterQualityGate(cluster)) {
-        exactClusters.push(cluster);
-      }
+      clusterGroups.push({ type: 'exact', key: group[0].signature, matches: group });
       continue;
     }
 
@@ -30,17 +28,15 @@ export function clusterClassNameMatches(matches, options = {}) {
     similarBuckets.get(bucketKey).push(...group);
   }
 
-  const similarClusters = [];
   for (const [bucketKey, group] of similarBuckets) {
     if (group.length >= minimumOccurrences && hasMeaningfulOverlap(group)) {
-      const cluster = buildCluster('similar', bucketKey, group, classWeights);
-      if (passesClusterQualityGate(cluster)) {
-        similarClusters.push(cluster);
-      }
+      clusterGroups.push({ type: 'similar', key: bucketKey, matches: group });
     }
   }
 
-  return [...exactClusters, ...similarClusters]
+  return mergeSimilarClusterGroups(clusterGroups, mergeJaccardThreshold)
+    .map((group) => buildCluster(group.type, group.key, group.matches, classWeights))
+    .filter(passesClusterQualityGate)
     .sort((a, b) => b.score - a.score || b.occurrences - a.occurrences || a.key.localeCompare(b.key))
     .map((cluster, index) => ({ id: `cluster-${String(index + 1).padStart(3, '0')}`, ...cluster }));
 }
@@ -96,6 +92,67 @@ function buildCluster(type, key, matches, classWeights) {
       sourceType: match.sourceType ?? 'className',
     })),
   };
+}
+
+function mergeSimilarClusterGroups(groups, threshold) {
+  const merged = groups.map((group) => ({ ...group, matches: [...group.matches] }));
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (let leftIndex = 0; leftIndex < merged.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < merged.length; rightIndex += 1) {
+        if (jaccardSimilarity(groupClassSet(merged[leftIndex]), groupClassSet(merged[rightIndex])) < threshold) {
+          continue;
+        }
+
+        merged[leftIndex] = combineClusterGroups(merged[leftIndex], merged[rightIndex]);
+        merged.splice(rightIndex, 1);
+        changed = true;
+        break;
+      }
+
+      if (changed) {
+        break;
+      }
+    }
+  }
+
+  return merged;
+}
+
+function combineClusterGroups(left, right) {
+  const keys = new Set([
+    ...left.key.split(' || ').filter(Boolean),
+    ...right.key.split(' || ').filter(Boolean),
+  ]);
+
+  return {
+    type: 'similar',
+    key: [...keys].sort().join(' || '),
+    matches: [...left.matches, ...right.matches],
+  };
+}
+
+function groupClassSet(group) {
+  return new Set(group.matches.flatMap((match) => match.classes));
+}
+
+function jaccardSimilarity(left, right) {
+  const union = new Set([...left, ...right]);
+  if (union.size === 0) {
+    return 0;
+  }
+
+  let intersection = 0;
+  for (const className of left) {
+    if (right.has(className)) {
+      intersection += 1;
+    }
+  }
+
+  return intersection / union.size;
 }
 
 function buildBucketKey(classes) {
