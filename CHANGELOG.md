@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.5.0 (2026-07-08)
+
+### `--blame` attribution
+
+- `dsg check --blame` annotates every finding with who introduced the line, via git blame: `introduced by: claude (just now)` — classifies claude / cursor / codex / bot / human. Off by default; adds an "Introduced By" column to `--report` markdown.
+
+### Shareable diagnosis
+
+- `scan` / `init` end with a Design System Diagnosis: **UI Chaos Grade (A–F)**, per-role variant counts, and the worst competing family with per-side usage counts. Catch-all roles are excluded from both the display and the grade.
+- Written to `design-system/diagnosis.md`; regenerate anytime with `dsg diagnose`.
+
+### Verified live
+
+- The PostToolUse hook loop was exercised against a real headless Claude Code agent: an explicitly-requested deprecated style was blocked with the decision escalated to the human, and a "match the app's style" task converged to the canonical signature 9/9 classes. See docs/reports/2026-07-08-hook-live-agent-demo.md.
+
 ## v0.4.0 (2026-07-08)
 
 Theme: "your AI invented its 4th button today" — now literally measurable.
