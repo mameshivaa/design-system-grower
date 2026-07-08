@@ -32,6 +32,7 @@
   },
   "files": [
     "src/",
+    "docs/hooks.md",
     "docs/mcp.md",
     "docs/mvp-spec.md",
     "docs/vision.md",

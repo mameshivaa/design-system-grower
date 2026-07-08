@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { Readable } from 'node:stream';
 import test from 'node:test';
 
 import {
@@ -1066,6 +1067,131 @@ test('check writes a markdown report', async () => {
   assert.match(report, /focus:ring-red-500/);
 });
 
+test('hook-check exits 2 with blocking feedback for a violating file', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />;
+      }
+    `,
+  });
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  let stderr = '';
+
+  const exitCode = await main(['hook-check', '--design-system', designSystemDir], {
+    stdin: Readable.from([JSON.stringify({ tool_input: { file_path: path.join(fixtureDir, 'src', 'Form.tsx') } })]),
+    stdout: { write: () => {} },
+    stderr: { write: (message) => { stderr += message; } },
+  });
+
+  assert.equal(exitCode, 2);
+  assert.match(stderr, /design-system drift detected/);
+  assert.match(stderr, /target asset: FormInput/);
+  assert.match(stderr, /canonical classes: .*focus:ring-blue-500/);
+  assert.match(stderr, /diff: missing focus:ring-blue-500; extra focus:ring-red-500/);
+});
+
+test('hook-check exits 0 quietly for a clean file', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />;
+      }
+    `,
+  });
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  let stdout = '';
+  let stderr = '';
+
+  const exitCode = await main(['hook-check', '--design-system', designSystemDir], {
+    stdin: Readable.from([JSON.stringify({ tool_input: { file_path: path.join(fixtureDir, 'src', 'Form.tsx') } })]),
+    stdout: { write: (message) => { stdout += message; } },
+    stderr: { write: (message) => { stderr += message; } },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(stdout, '');
+  assert.equal(stderr, '');
+});
+
+test('hook-check exits 0 quietly for invalid hook JSON', async () => {
+  const fixtureDir = await makeFixtureRepo({});
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  let stderr = '';
+
+  const exitCode = await main(['hook-check', '--design-system', designSystemDir], {
+    stdin: Readable.from(['{not json']),
+    stdout: { write: () => {} },
+    stderr: { write: (message) => { stderr += message; } },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(stderr, '');
+});
+
+test('install-hooks creates a new Claude settings file', async () => {
+  const fixtureDir = await makeFixtureRepo({});
+  const settingsPath = path.join(fixtureDir, '.claude', 'settings.json');
+  const designSystemDir = path.join(fixtureDir, 'design-system');
+  let stdout = '';
+
+  const exitCode = await main(['install-hooks', '--design-system', designSystemDir, '--settings', settingsPath], {
+    stdout: { write: (message) => { stdout += message; } },
+  });
+  const settings = JSON.parse(await fs.readFile(settingsPath, 'utf8'));
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout, /Writing Claude Code hook settings/);
+  assert.equal(settings.hooks.PostToolUse.length, 1);
+  assert.equal(settings.hooks.PostToolUse[0].matcher, 'Write|Edit');
+  assert.match(settings.hooks.PostToolUse[0].hooks[0].command, /design-system-grower hook-check --design-system/);
+});
+
+test('install-hooks preserves existing settings and appends a PostToolUse hook', async () => {
+  const fixtureDir = await makeFixtureRepo({});
+  const settingsPath = path.join(fixtureDir, '.claude', 'settings.json');
+  const designSystemDir = path.join(fixtureDir, 'design-system');
+  await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+  await fs.writeFile(settingsPath, `${JSON.stringify({
+    permissions: { allow: ['Bash(npm test)'] },
+    hooks: {
+      PostToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: 'echo existing' }],
+        },
+      ],
+    },
+  }, null, 2)}\n`, 'utf8');
+
+  const exitCode = await main(['install-hooks', '--design-system', designSystemDir, '--settings', settingsPath], {
+    stdout: { write: () => {} },
+  });
+  const settings = JSON.parse(await fs.readFile(settingsPath, 'utf8'));
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(settings.permissions, { allow: ['Bash(npm test)'] });
+  assert.equal(settings.hooks.PostToolUse.length, 2);
+  assert.equal(settings.hooks.PostToolUse[0].matcher, 'Bash');
+  assert.equal(settings.hooks.PostToolUse[1].matcher, 'Write|Edit');
+});
+
+test('install-hooks does not duplicate the same hook on repeated runs', async () => {
+  const fixtureDir = await makeFixtureRepo({});
+  const settingsPath = path.join(fixtureDir, '.claude', 'settings.json');
+  const designSystemDir = path.join(fixtureDir, 'design-system');
+
+  await main(['install-hooks', '--design-system', designSystemDir, '--settings', settingsPath], {
+    stdout: { write: () => {} },
+  });
+  await main(['install-hooks', '--design-system', designSystemDir, '--settings', settingsPath], {
+    stdout: { write: () => {} },
+  });
+  const settings = JSON.parse(await fs.readFile(settingsPath, 'utf8'));
+
+  assert.equal(settings.hooks.PostToolUse.length, 1);
+});
+
 test('mcp stdio server lists, looks up, and checks approved assets', async () => {
   const fixtureDir = await makeFixtureRepo({});
   const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
@@ -1189,6 +1315,27 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     designSystem: 'design-system',
   });
   assert.deepEqual(parseArgs([
+    'hook-check',
+    '--design-system',
+    'design-system',
+  ]), {
+    command: 'hook-check',
+    designSystem: 'design-system',
+  });
+  assert.deepEqual(parseArgs([
+    'install-hooks',
+    '--design-system',
+    'design-system',
+    '--settings',
+    '.claude/settings.json',
+    '--force',
+  ]), {
+    command: 'install-hooks',
+    designSystem: 'design-system',
+    settings: '.claude/settings.json',
+    force: true,
+  });
+  assert.deepEqual(parseArgs([
     'install-instructions',
     'design-system',
     '--agents-out',
@@ -1205,6 +1352,7 @@ test('parseArgs rejects invalid options before running the scanner', () => {
   });
   assert.throws(() => parseArgs(['decide', 'design-system', 'candidate-001', 'bad-action']), /Unknown decision action/);
   assert.throws(() => parseArgs(['check', 'repo']), /--design-system/);
+  assert.throws(() => parseArgs(['hook-check']), /--design-system/);
   assert.throws(() => parseArgs(['mcp']), /--design-system/);
 });
 

@@ -5,6 +5,7 @@ import { buildCatalog, writeCatalog, writeDesignSystemArtifacts } from './catalo
 import { runDesignSystemCheck } from './check.js';
 import { saveDecision, VALID_ACTIONS, writeAssetArtifacts } from './decision-actions.js';
 import { buildAgentRulesMarkdown } from './decisions.js';
+import { installClaudeHooks, runHookCheck } from './hooks.js';
 import { runInit } from './init.js';
 import { startMcpServer } from './mcp-server.js';
 import { openReviewUrl, startReviewServer } from './review-server.js';
@@ -65,6 +66,20 @@ export async function main(argv = process.argv.slice(2), streams = process) {
     return result.exitCode;
   }
 
+  if (options.command === 'hook-check') {
+    return runHookCheck({
+      designSystem: options.designSystem,
+    }, streams);
+  }
+
+  if (options.command === 'install-hooks') {
+    return installClaudeHooks({
+      designSystem: options.designSystem,
+      settings: options.settings,
+      force: options.force,
+    }, streams);
+  }
+
   if (options.command === 'init') {
     return runInit(options, streams);
   }
@@ -115,7 +130,7 @@ export async function main(argv = process.argv.slice(2), streams = process) {
 
 export function parseArgs(argv) {
   const options = {};
-  const knownCommands = new Set(['scan', 'init', 'instruct', 'decide', 'review', 'install-instructions', 'check', 'mcp']);
+  const knownCommands = new Set(['scan', 'init', 'instruct', 'decide', 'review', 'install-instructions', 'check', 'hook-check', 'install-hooks', 'mcp']);
   const command = knownCommands.has(argv[0]) ? argv[0] : 'scan';
   const args = knownCommands.has(argv[0]) ? argv.slice(1) : argv;
   options.command = command;
@@ -169,6 +184,12 @@ export function parseArgs(argv) {
 
     if (arg === '--report') {
       options.report = requireValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--settings') {
+      options.settings = requireValue(args, index, arg);
       index += 1;
       continue;
     }
@@ -255,7 +276,7 @@ export function parseArgs(argv) {
       throw new Error(`Unexpected argument: ${arg}`);
     }
 
-    if (command === 'mcp') {
+    if (command === 'mcp' || command === 'hook-check' || command === 'install-hooks') {
       throw new Error(`Unexpected argument: ${arg}`);
     }
 
@@ -281,6 +302,10 @@ export function parseArgs(argv) {
     if (!options.designSystem) {
       throw new Error('check requires --design-system <artifacts-dir>');
     }
+  }
+
+  if (command === 'hook-check' && !options.designSystem) {
+    throw new Error('hook-check requires --design-system <artifacts-dir>');
   }
 
   if (command === 'mcp' && !options.designSystem) {
@@ -353,6 +378,8 @@ export function helpText() {
     '  design-system-grower instruct [design-system-dir]',
     '  design-system-grower decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--strict] [--report out.md]',
+    '  design-system-grower hook-check --design-system <artifacts-dir>',
+    '  design-system-grower install-hooks [--design-system <artifacts-dir>] [--settings .claude/settings.json] [--force]',
     '  design-system-grower mcp --design-system <artifacts-dir>',
     '  design-system-grower review [design-system-dir] [--port 4173] [--no-open]',
     '  design-system-grower install-instructions [design-system-dir] [--agents-out AGENTS.md] [--claude-out CLAUDE.md]',
@@ -361,6 +388,8 @@ export function helpText() {
     '  node src/cli.mjs instruct [design-system-dir]',
     '  node src/cli.mjs decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
     '  node src/cli.mjs check <repo-path> --design-system <artifacts-dir>',
+    '  node src/cli.mjs hook-check --design-system <artifacts-dir>',
+    '  node src/cli.mjs install-hooks [--design-system <artifacts-dir>] [--settings .claude/settings.json] [--force]',
     '  node src/cli.mjs mcp --design-system <artifacts-dir>',
     '  node src/cli.mjs review [design-system-dir] [--no-open]',
     '  node src/cli.mjs install-instructions [design-system-dir] [--force]',
@@ -372,6 +401,7 @@ export function helpText() {
     '  --files <glob,glob>        Limit check to comma-separated files or simple globs',
     '  --strict                   Exit 1 from check when drift is found',
     '  --report <path>            Write a markdown check report',
+    '  --settings <path>          Claude Code settings path (install-hooks)',
     '  --name <AssetName>         Name the approved asset when using decide',
     '  --side <n>                 Canonical side number when approving a canonicalize decision',
     '  --host <host>              Host for the local review server (default: 127.0.0.1)',
