@@ -10,7 +10,7 @@ export function normalizeClasses(value) {
   return value
     .split(/\s+/)
     .map((part) => part.trim())
-    .filter(Boolean);
+    .filter(isClassTokenCandidate);
 }
 
 export function extractJsxClassNames(source, filePath) {
@@ -21,7 +21,9 @@ export function extractJsxClassNames(source, filePath) {
     const className = match[1] ?? match[2] ?? match[4] ?? '';
     const element = findElementName(source, match.index);
     const position = lineAndColumn(source, match.index);
-    const classes = normalizeClasses(className);
+    const classes = match[3] === '`'
+      ? extractTemplateLiteralClasses(className)
+      : normalizeClasses(className);
 
     if (classes.length === 0) {
       continue;
@@ -142,6 +144,103 @@ function extractStringLiteralClasses(source) {
   }
 
   return classes;
+}
+
+function extractTemplateLiteralClasses(source) {
+  const classes = [];
+  let staticChunk = '';
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (char === '\\') {
+      staticChunk += char;
+      if (index + 1 < source.length) {
+        staticChunk += source[index + 1];
+        index += 1;
+      }
+      continue;
+    }
+
+    if (char === '$' && source[index + 1] === '{') {
+      classes.push(...normalizeClasses(staticChunk));
+      staticChunk = '';
+
+      const closeBrace = findMatchingExpressionBrace(source, index + 1);
+      if (closeBrace === -1) {
+        break;
+      }
+
+      classes.push(...extractStringLiteralClasses(source.slice(index + 2, closeBrace)));
+      index = closeBrace;
+      continue;
+    }
+
+    staticChunk += char;
+  }
+
+  classes.push(...normalizeClasses(staticChunk));
+  return classes;
+}
+
+function findMatchingExpressionBrace(source, openBrace) {
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+
+  for (let index = openBrace; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+
+    if (char === '{') {
+      depth += 1;
+      continue;
+    }
+
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function isClassTokenCandidate(token) {
+  if (!token) {
+    return false;
+  }
+
+  if (token === ':' || token === '?' || token === '${') {
+    return false;
+  }
+
+  if (token.includes('${')) {
+    return false;
+  }
+
+  if (/^["'`]|["'`]$/.test(token)) {
+    return false;
+  }
+
+  return /[A-Za-z0-9_\-[\]!:/.%#]/.test(token);
 }
 
 function extractVariantNames(source) {
