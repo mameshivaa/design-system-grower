@@ -1,7 +1,23 @@
 import { classCategories, stripVariant } from './class-analysis.js';
 
-const DEFAULT_MIN_JACCARD = 0.3;
-const DEFAULT_MAX_JACCARD = 0.75;
+const DEFAULT_MIN_STRUCTURAL_JACCARD = 0.7;
+
+// Perceptually interchangeable Tailwind color families. A swap *within* a
+// group (green -> emerald) is drift; a difference *across* groups
+// (slate -> red) is an intentional tone variant, not drift.
+const SYNONYM_COLOR_GROUPS = [
+  ['green', 'emerald'],
+  ['gray', 'slate', 'zinc', 'neutral', 'stone'],
+  ['red', 'rose'],
+  ['yellow', 'amber'],
+  ['blue', 'sky'],
+  ['violet', 'purple'],
+  ['teal', 'cyan'],
+];
+
+const SYNONYM_GROUP_BY_FAMILY = new Map(
+  SYNONYM_COLOR_GROUPS.flatMap((group, index) => group.map((family) => [family, index])),
+);
 
 const COLOR_FAMILIES = new Set([
   'slate',
@@ -29,8 +45,7 @@ const COLOR_FAMILIES = new Set([
 ]);
 
 export function detectCompetingFamilies(matches, options = {}) {
-  const minJaccard = options.minJaccard ?? DEFAULT_MIN_JACCARD;
-  const maxJaccard = options.maxJaccard ?? DEFAULT_MAX_JACCARD;
+  const minJaccard = options.minJaccard ?? DEFAULT_MIN_STRUCTURAL_JACCARD;
   const groups = buildSignatureGroups(matches)
     .filter((group) => group.matches.length > 0 && group.classes.length > 0);
   const families = [];
@@ -40,16 +55,25 @@ export function detectCompetingFamilies(matches, options = {}) {
       const left = groups[leftIndex];
       const right = groups[rightIndex];
 
-      if (left.elementKey !== right.elementKey || left.categoryKey !== right.categoryKey) {
+      if (left.elementKey !== right.elementKey || left.categoryNames !== right.categoryNames) {
         continue;
       }
 
-      const similarity = jaccardSimilarity(new Set(left.classes), new Set(right.classes));
-      if (similarity < minJaccard || similarity > maxJaccard) {
+      if (left.classes.join(' ') === right.classes.join(' ')) {
         continue;
       }
 
-      const colorDrift = colorFamilyDrift(left.classes, right.classes);
+      // Compare structure with synonym color groups normalized away, so a
+      // pure green -> emerald swap scores 1.0 instead of being diluted.
+      const similarity = jaccardSimilarity(
+        new Set(left.classes.map(normalizeSynonymColors)),
+        new Set(right.classes.map(normalizeSynonymColors)),
+      );
+      if (similarity < minJaccard) {
+        continue;
+      }
+
+      const colorDrift = synonymColorDrift(left.classes, right.classes);
       if (colorDrift.length === 0) {
         continue;
       }
@@ -101,6 +125,12 @@ function buildSignatureGroups(matches) {
     ...group,
     elementTags: [...group.elementTags].sort(),
     elementKey: [...group.elementTags].sort().join('|'),
+    categoryNames: group.categoryKey
+      .split('|')
+      .filter(Boolean)
+      .map((entry) => entry.split(':')[0])
+      .sort()
+      .join('|'),
   }));
 }
 
@@ -181,23 +211,43 @@ function summarizeCategorySignature(signature) {
     });
 }
 
-function colorFamilyDrift(leftClasses, rightClasses) {
+function normalizeSynonymColors(className) {
+  const family = colorFamilyFor(className);
+  if (family === null) {
+    return className;
+  }
+  const group = SYNONYM_GROUP_BY_FAMILY.get(family);
+  if (group === undefined) {
+    return className;
+  }
+  return className.replace(family, `synonym-group-${group}`);
+}
+
+function synonymColorDrift(leftClasses, rightClasses) {
   const left = colorFamiliesFor(leftClasses);
   const right = colorFamiliesFor(rightClasses);
-  const drift = [];
+  const leftOnly = [...left].filter((family) => !right.has(family));
+  const rightOnly = [...right].filter((family) => !left.has(family));
 
-  for (const family of left) {
-    if (!right.has(family)) {
-      drift.push(family);
-    }
-  }
-  for (const family of right) {
-    if (!left.has(family)) {
-      drift.push(family);
-    }
+  if (leftOnly.length === 0 || rightOnly.length === 0) {
+    return [];
   }
 
-  return uniqueSorted(drift);
+  // Every differing family must swap with a synonym on the other side;
+  // any cross-group difference means the sides play different roles.
+  const groupsOf = (families) => families.map((family) => SYNONYM_GROUP_BY_FAMILY.get(family));
+  const leftGroups = groupsOf(leftOnly);
+  const rightGroups = groupsOf(rightOnly);
+  if (leftGroups.includes(undefined) || rightGroups.includes(undefined)) {
+    return [];
+  }
+  const sameGroups = new Set(leftGroups).size === new Set(rightGroups).size
+    && [...new Set(leftGroups)].every((group) => rightGroups.includes(group));
+  if (!sameGroups) {
+    return [];
+  }
+
+  return uniqueSorted([...leftOnly, ...rightOnly]);
 }
 
 function colorFamiliesFor(classes) {
