@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildApprovedAssets, buildAssetsMarkdown } from './assets.js';
 import { buildCatalog, writeCatalog, writeDesignSystemArtifacts } from './catalog.js';
+import { saveDecision, VALID_ACTIONS, writeAssetArtifacts } from './decision-actions.js';
 import { buildAgentRulesMarkdown } from './decisions.js';
 import { openReviewUrl, startReviewServer } from './review-server.js';
 
@@ -29,20 +29,11 @@ export async function main(argv = process.argv.slice(2), streams = process) {
 
   if (options.command === 'decide') {
     const artifactsDir = path.resolve(options.target ?? path.join(process.cwd(), 'design-system'));
-    const catalog = JSON.parse(await fs.readFile(path.join(artifactsDir, 'catalog.json'), 'utf8'));
-    const decisionsPath = path.join(artifactsDir, 'decisions.json');
-    const decisions = JSON.parse(await fs.readFile(decisionsPath, 'utf8'));
-    const updatedDecisions = approveDecision(
-      catalog,
-      decisions,
-      options.candidateId,
-      options.userDecision,
-      options.assetName,
-    );
-    await fs.writeFile(decisionsPath, `${JSON.stringify(updatedDecisions, null, 2)}\n`, 'utf8');
-    await writeAssetArtifacts(artifactsDir, catalog, updatedDecisions);
-    const rules = buildAgentRulesMarkdown(catalog, updatedDecisions);
-    await fs.writeFile(path.join(artifactsDir, 'agent-rules.md'), rules, 'utf8');
+    await saveDecision(artifactsDir, {
+      candidateId: options.candidateId,
+      decision: options.userDecision,
+      assetName: options.assetName,
+    });
     streams.stdout.write(`Approved ${options.candidateId} as ${options.userDecision} and regenerated agent rules in ${artifactsDir}\n`);
     return 0;
   }
@@ -220,42 +211,6 @@ export function parseArgs(argv) {
   }
 
   return options;
-}
-
-const VALID_ACTIONS = new Set([
-  'reuse',
-  'promote-variant',
-  'wrap',
-  'extract-block',
-  'document-rule',
-  'ignore',
-  'unsupported',
-]);
-
-function approveDecision(catalog, decisions, candidateId, userDecision, assetName) {
-  if (!catalog.candidates.some((candidate) => candidate.id === candidateId)) {
-    throw new Error(`Unknown candidate: ${candidateId}`);
-  }
-
-  const decisionIndex = decisions.findIndex((decision) => decision.candidateId === candidateId);
-  if (decisionIndex === -1) {
-    throw new Error(`No decision row found for candidate: ${candidateId}`);
-  }
-
-  const updated = decisions.slice();
-  updated[decisionIndex] = {
-    ...updated[decisionIndex],
-    userDecision,
-    status: 'approved',
-    ...(assetName ? { assetName } : {}),
-  };
-  return updated;
-}
-
-async function writeAssetArtifacts(artifactsDir, catalog, decisions) {
-  const assets = buildApprovedAssets(catalog, decisions);
-  await fs.writeFile(path.join(artifactsDir, 'assets.json'), `${JSON.stringify(assets, null, 2)}\n`, 'utf8');
-  await fs.writeFile(path.join(artifactsDir, 'assets.md'), buildAssetsMarkdown(assets), 'utf8');
 }
 
 function waitForShutdown(server) {
