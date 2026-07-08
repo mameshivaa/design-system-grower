@@ -1,7 +1,7 @@
 {
   "name": "design-system-grower",
   "version": "0.1.0",
-  "private": true,
+  "description": "Repo-first CLI for finding repeated UI patterns and growing a project-specific design system.",
   "type": "module",
   "bin": {
     "design-system-grower": "./src/cli.mjs",
@@ -10,7 +10,32 @@
   "scripts": {
     "test": "node --test"
   },
+  "keywords": [
+    "design-system",
+    "ui",
+    "tailwind",
+    "react",
+    "cli",
+    "agents"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/design-system-grower/design-system-grower.git"
+  },
+  "bugs": {
+    "url": "https://github.com/design-system-grower/design-system-grower/issues"
+  },
+  "homepage": "https://github.com/design-system-grower/design-system-grower#readme",
   "engines": {
     "node": ">=20"
-  }
+  },
+  "files": [
+    "src/",
+    "docs/mvp-spec.md",
+    "docs/vision.md",
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md"
+  ]
 }
