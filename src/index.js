@@ -1,6 +1,7 @@
 export { buildCatalog, writeCatalog, writeDesignSystemArtifacts } from './catalog.js';
 export { buildCandidates } from './candidates.js';
 export { classCategory, clusterClassNameMatches } from './cluster.js';
+export { buildDiagnosis, regenerateDiagnosis, writeDiagnosis } from './diagnosis.js';
 export {
   analyzeSource,
   extractClassCompositionCalls,
