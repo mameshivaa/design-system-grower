@@ -114,6 +114,30 @@ test('buildCatalog excludes template expression syntax tokens from candidate com
   assert.ok(commonClasses.every((className) => !['${', ':', '?'].includes(className)));
 });
 
+test('buildCatalog excludes cn template condition identifiers from candidate commonClasses', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Notices.tsx': `
+      import { cn } from "@/lib/utils";
+      export function Notices({ error, isOpen }) {
+        return <>
+          <div className={cn(\`px-3 py-2 rounded border text-sm \${error ? "border-red-300" : "border-slate-300"} \${isOpen ? "bg-white" : "bg-slate-50"}\`)} />
+          <div className={cn(\`px-3 py-2 rounded border text-sm \${error ? "border-red-300" : "border-slate-300"} \${isOpen ? "bg-white" : "bg-slate-50"}\`)} />
+        </>;
+      }
+    `,
+  });
+
+  const catalog = await buildCatalog(fixtureDir);
+  const commonClasses = catalog.candidates[0].commonClasses;
+
+  assert.ok(commonClasses.includes('border-red-300'));
+  assert.ok(commonClasses.includes('border-slate-300'));
+  assert.ok(commonClasses.includes('bg-white'));
+  assert.ok(commonClasses.includes('bg-slate-50'));
+  assert.ok(!commonClasses.includes('error'));
+  assert.ok(!commonClasses.includes('isOpen'));
+});
+
 test('buildCatalog merges near-duplicate class clusters before building candidates', async () => {
   const fixtureDir = await makeFixtureRepo({
     'src/Form.tsx': `
@@ -147,6 +171,33 @@ test('buildCatalog merges near-duplicate class clusters before building candidat
   assert.equal(inputCandidates[0].source.occurrences, 4);
   assert.ok(inputCandidates[0].variantClasses.includes('focus:ring-blue-500'));
   assert.ok(inputCandidates[0].variantClasses.includes('focus:ring-red-500'));
+});
+
+test('buildCatalog merges high-jaccard clusters before actionType can split candidates', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Actions.tsx': `
+      export function Actions() {
+        return <>
+          <BillingButton className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white" />
+          <BillingButton className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white" />
+          <button className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white h-9 shadow-sm focus:ring-2">Save</button>
+          <button className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white h-10 shadow-md focus:ring-4">Continue</button>
+        </>;
+      }
+    `,
+  });
+
+  const catalog = await buildCatalog(fixtureDir);
+  const buttonCandidates = catalog.candidates.filter((candidate) => (
+    candidate.commonClasses.includes('inline-flex')
+      && candidate.commonClasses.includes('justify-center')
+      && candidate.commonClasses.includes('bg-blue-600')
+  ));
+
+  assert.equal(buttonCandidates.length, 1);
+  assert.equal(buttonCandidates[0].source.occurrences, 4);
+  assert.equal(buttonCandidates[0].source.examples.length, 4);
+  assert.equal(buttonCandidates[0].actionType, 'extract-block');
 });
 
 test('extractClassCompositionCalls reads static classes from cn calls', () => {

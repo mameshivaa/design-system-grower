@@ -136,7 +136,8 @@ function combineClusterGroups(left, right) {
 }
 
 function groupClassSet(group) {
-  return new Set(group.matches.flatMap((match) => match.classes));
+  const commonClasses = findCommonClasses(group.matches);
+  return new Set(commonClasses.length > 0 ? commonClasses : group.matches.flatMap((match) => match.classes));
 }
 
 function jaccardSimilarity(left, right) {
