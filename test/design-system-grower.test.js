@@ -627,8 +627,12 @@ test('instruct regenerates agent rules from approved decisions', async () => {
   assert.equal(exitCode, 0);
   assert.match(stdout, /Wrote agent rules/);
   assert.match(agentRules, /Approved UI Decisions/);
+  assert.match(agentRules, /### PrimaryAction/);
   assert.match(agentRules, /Use or introduce PrimaryAction/);
+  assert.match(agentRules, /- Common classes: `.*inline-flex/);
+  assert.match(agentRules, /Machine-readable data: `assets\.json`/);
   assert.doesNotMatch(agentRules, /Review candidate-001 before adding similar UI/);
+  assert.doesNotMatch(agentRules, /Review candidate-\d+ before adding similar UI/);
   assert.equal(assets[0].name, 'PrimaryAction');
   assert.equal(assets[0].actionType, 'promote-variant');
   assert.match(assetsMarkdown, /## PrimaryAction/);
@@ -666,7 +670,13 @@ test('decide approves a candidate and refreshes agent rules and assets', async (
   assert.equal(decisions[0].userDecision, 'wrap');
   assert.equal(decisions[0].assetName, 'SurfaceCard');
   assert.match(agentRules, /Prefer SurfaceCard as a wrapper component/);
+  assert.match(agentRules, /### SurfaceCard/);
+  assert.match(agentRules, /- Common classes: `.*rounded/);
+  assert.match(agentRules, /```jsx/);
+  assert.match(agentRules, /- Representative usage:/);
   assert.equal(assets[0].name, 'SurfaceCard');
+  assert.ok(assets[0].usageExample?.snippet, 'approved asset exposes a usage example snippet');
+  assert.ok(Array.isArray(assets[0].referenceLocations) && assets[0].referenceLocations.length > 0);
   assert.equal(assets[0].candidateId, 'candidate-001');
   assert.equal(assets[0].actionType, 'wrap');
   assert.ok(assets[0].commonClasses.includes('rounded'));

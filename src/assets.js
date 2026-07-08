@@ -10,6 +10,8 @@ export function buildApprovedAssets(catalog, decisions = []) {
       }
 
       const name = decision.assetName || defaultAssetName(candidate);
+      const elementTags = uniqueValues(candidate.source.examples.map((example) => example.element));
+      const usageExample = buildUsageExample(candidate.source.examples[0]);
       return {
         id: `asset-${candidate.id.replace(/^candidate-/, '')}`,
         name,
@@ -20,6 +22,14 @@ export function buildApprovedAssets(catalog, decisions = []) {
         usageGuidance: usageGuidanceFor(name, candidate, decision.userDecision),
         commonClasses: candidate.commonClasses,
         variantClasses: candidate.variantClasses,
+        elementTags,
+        usageExample,
+        referenceLocations: candidate.source.examples.map((example) => ({
+          file: example.file,
+          line: example.line,
+          column: example.column,
+          element: example.element,
+        })),
         source: candidate.source,
       };
     })
@@ -48,6 +58,17 @@ export function buildAssetsMarkdown(assets) {
     if (asset.variantClasses.length > 0) {
       lines.push(`- Variant classes: \`${asset.variantClasses.join(' ')}\``);
     }
+    if (asset.elementTags.length > 0) {
+      lines.push(`- Elements: ${asset.elementTags.map((element) => `\`${element}\``).join(', ')}`);
+    }
+    if (asset.usageExample) {
+      lines.push(`- Representative example: ${asset.usageExample.file}:${asset.usageExample.line}:${asset.usageExample.column}`);
+      lines.push('');
+      lines.push('```jsx');
+      lines.push(asset.usageExample.snippet);
+      lines.push('```');
+      lines.push('');
+    }
     lines.push('- Sources:');
     for (const example of asset.source.examples.slice(0, 5)) {
       lines.push(`  - ${example.file}:${example.line}:${example.column} (${example.element})`);
@@ -72,6 +93,44 @@ function defaultAssetName(candidate) {
     .join('');
 
   return normalized || candidate.id;
+}
+
+function buildUsageExample(example) {
+  if (!example) {
+    return null;
+  }
+
+  return {
+    file: example.file,
+    line: example.line,
+    column: example.column,
+    element: example.element,
+    sourceType: example.sourceType,
+    snippet: jsxSnippetFor(example),
+  };
+}
+
+function jsxSnippetFor(example) {
+  const element = example.element || 'div';
+  const className = String(example.className ?? '').replace(/\s+/g, ' ').trim();
+
+  if (example.sourceType === 'cn') {
+    return `<${element} className={cn(${className})} />`;
+  }
+
+  if (example.sourceType === 'situation') {
+    return `// ${className || 'observe-only signal'}`;
+  }
+
+  return `<${element} className="${escapeAttribute(className)}" />`;
+}
+
+function escapeAttribute(value) {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))].sort();
 }
 
 function usageGuidanceFor(name, candidate, actionType) {

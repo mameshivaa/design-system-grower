@@ -1,3 +1,5 @@
+import { buildApprovedAssets } from './assets.js';
+
 export function buildDecisionsMarkdown(catalog) {
   const lines = [
     '# Design System Decisions',
@@ -50,11 +52,15 @@ export function buildInitialDecisions(catalog) {
 
 export function buildAgentRulesMarkdown(catalog, decisions = buildInitialDecisions(catalog)) {
   const approved = approvedDecisionPairs(catalog, decisions);
+  const approvedAssets = buildApprovedAssets(catalog, decisions);
+  const assetsByCandidate = new Map(approvedAssets.map((asset) => [asset.candidateId, asset]));
   const pending = pendingCandidates(catalog, decisions);
   const lines = [
     '# UI Agent Rules',
     '',
     'These rules are generated from the local design-system inventory. Prefer existing UI assets and documented decisions before creating new one-off JSX.',
+    '',
+    'Machine-readable data: `assets.json` (approved UI assets) and `catalog.json` (full scan result) in this directory.',
     '',
     '## Current Situations',
     '',
@@ -74,7 +80,30 @@ export function buildAgentRulesMarkdown(catalog, decisions = buildInitialDecisio
     lines.push('- No UI decisions have been approved yet. Use the pending decisions below before creating similar UI.');
   } else {
     for (const { candidate, decision } of approved) {
-      lines.push(`- ${agentRuleFor(candidate, decision)}`);
+      const asset = assetsByCandidate.get(candidate.id);
+      lines.push(`### ${decision.assetName || candidate.id}`, '');
+      lines.push(`- Rule: ${agentRuleFor(candidate, decision)}`);
+      lines.push(`- Action: \`${decision.userDecision}\``);
+      if (asset?.elementTags?.length) {
+        lines.push(`- Elements: ${asset.elementTags.map((element) => `\`${element}\``).join(', ')}`);
+      }
+      if (candidate.commonClasses.length > 0) {
+        lines.push(`- Common classes: \`${candidate.commonClasses.join(' ')}\``);
+      }
+      if (candidate.variantClasses.length > 0) {
+        lines.push(`- Variant classes: \`${candidate.variantClasses.join(' ')}\``);
+      }
+      const locations = candidate.source.examples
+        .slice(0, 3)
+        .map((example) => `${example.file}:${example.line}`)
+        .join(', ');
+      if (locations) {
+        lines.push(`- Reference locations: ${locations}`);
+      }
+      if (asset?.usageExample?.snippet) {
+        lines.push('- Representative usage:', '', '```jsx', asset.usageExample.snippet, '```');
+      }
+      lines.push('');
     }
   }
 
@@ -83,9 +112,9 @@ export function buildAgentRulesMarkdown(catalog, decisions = buildInitialDecisio
   if (pending.length === 0) {
     lines.push('- No reusable UI candidates are pending.');
   } else {
-    for (const candidate of pending) {
-      lines.push(`- Review ${candidate.id} before adding similar UI: recommended action is \`${candidate.recommendedAction}\` (${candidate.safetyLevel}).`);
-    }
+    lines.push(
+      `- ${pending.length} candidate${pending.length === 1 ? ' is' : 's are'} pending review. Run \`dsg review <design-system-dir>\` to decide them; see \`decisions.md\` for the full checklist.`,
+    );
   }
 
   lines.push(
@@ -121,19 +150,14 @@ function pendingCandidates(catalog, decisions) {
 function agentRuleFor(candidate, decision) {
   const action = decision.userDecision;
   const assetName = decision.assetName || candidate.id;
-  const classes = [...candidate.commonClasses, ...candidate.variantClasses].join(' ');
-  const locations = candidate.source.examples
-    .slice(0, 3)
-    .map((example) => `${example.file}:${example.line}`)
-    .join(', ');
 
   switch (action) {
     case 'reuse':
-      return `Reuse ${assetName} before creating similar JSX. Reference locations: ${locations}.`;
+      return `Reuse ${assetName} before creating similar JSX.`;
     case 'promote-variant':
-      return `Use or introduce ${assetName} as an explicit variant instead of repeating ad-hoc classes: \`${classes}\`.`;
+      return `Use or introduce ${assetName} as an explicit variant instead of repeating ad-hoc classes.`;
     case 'wrap':
-      return `Prefer ${assetName} as a wrapper component when this repeated override appears again. Reference locations: ${locations}.`;
+      return `Prefer ${assetName} as a wrapper component when this repeated override appears again.`;
     case 'extract-block':
       return `Treat ${assetName} as a domain/product block candidate and avoid recreating it inline.`;
     case 'document-rule':
