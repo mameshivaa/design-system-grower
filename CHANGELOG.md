@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.4.0 (2026-07-08)
+
+Theme: "your AI invented its 4th button today" — now literally measurable.
+
+### Role taxonomy
+
+- Every candidate is classified into a UI role (Button, FormField, Card, Badge, Alert, Heading, Link, Text, Layout).
+- `scan` / `init` print per-role variant counts: `Alert: 19 variants (2 competing families)` — verified on a 903-file production app with 0 misclassified samples.
+- `catalog.summary.roles` carries the counts for tooling.
+
+### New-variant detection in `dsg check`
+
+- Works from day one, before any approvals: changed code whose class set is 0.65–0.95 similar to an existing (even unapproved) catalog pattern is flagged as `new-variant` with the message "it would be Button variant #5".
+- `--base <git-ref>` limits the check to files changed since a ref (plus uncommitted changes) — PR mode.
+- Catch-all roles (Other/Layout/Text) are never flagged; near-miss/deprecated take precedence over new-variant for the same usage.
+- All check messages unified to English.
+
+### `dsg install-hooks` — catch the agent in the act
+
+- `dsg hook-check`: Claude Code PostToolUse-compatible hook. Reads the edited file path from stdin, runs the drift check on that one file, and exits 2 with fix instructions (canonical classes + diff) as blocking feedback the agent must address. Fail-open on anything unexpected.
+- `dsg install-hooks`: writes the hook into `.claude/settings.json` with a non-destructive JSON merge (existing settings and hooks preserved, idempotent on re-run).
+
 ## v0.3.0 (2026-07-08)
 
 Theme: five-minute onboarding and live agent access.

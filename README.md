@@ -20,7 +20,18 @@ The fix isn't another component library. Your repo already *has* a design system
 npx design-system-grower init .
 ```
 
-One command: scans your repo, prints what your UI has converged into, opens the local promotion board, and tells you the exact next commands. (Prefer separate steps? `dsg scan` / `dsg review` still work.)
+One command: scans your repo, prints what your UI has converged into — per role —, opens the local promotion board, and tells you the exact next commands. (Prefer separate steps? `dsg scan` / `dsg review` still work.)
+
+```txt
+Button: 19 variants (0 competing families)
+Alert: 19 variants (2 competing families)
+FormField: 4 variants
+```
+
+That's a real production app. Your AI probably invented one of those button variants yesterday. The rest of the tool exists to stop variant #20:
+
+- `dsg check --base main` flags it in the PR: *"This invents a new variant of an existing pattern — it would be Button variant #20."* Works from day one, before you've approved anything.
+- `dsg install-hooks` catches it in the act: a Claude Code PostToolUse hook runs on every file the agent writes, and drift comes back as blocking feedback the agent must fix before moving on.
 
 1. **Scan** (read-only, no network, zero runtime dependencies): extracts `className`, `cn(...)`, and `cva(...)` patterns from `.js/.jsx/.ts/.tsx`, weights classes by repo-level distinctiveness, and clusters real repeated patterns — generic utility co-occurrence (`flex items-center gap-2`) is filtered out, and your existing `components/ui/*` are treated as inventory, not re-discovered.
 2. **Review**: a local promotion board (top candidates, source snippets, one-click approval) shows what your UI has actually converged into.
