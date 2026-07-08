@@ -1061,9 +1061,124 @@ test('check writes a markdown report', async () => {
   assert.equal(exitCode, 0);
   assert.match(report, /## dsg check/);
   assert.match(report, /\| Location \| Type \| Asset \| Diff \|/);
+  assert.match(report, /\| Type \| Count \|/);
+  assert.match(report, /\| near-miss \| 1 \|/);
   assert.match(report, /src\/Form\.tsx:3/);
   assert.match(report, /FormInput/);
   assert.match(report, /focus:ring-red-500/);
+});
+
+test('check reports a new-variant from unapproved catalog candidates', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/NewButton.tsx': `
+      export function NewButton() {
+        return <button className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-indigo-600 text-white shadow-sm">Save</button>;
+      }
+    `,
+  });
+  const designSystemDir = await makeCandidateOnlyDesignSystem(fixtureDir);
+  let stdout = '';
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir], {
+    stdout: { write: (message) => { stdout += message; } },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout, /new-variant Button/);
+  assert.match(stdout, /既存パターンの新しい変種を発明しています/);
+  assert.match(stdout, /これは Button の 5 つ目の変種になります/);
+});
+
+test('check does not report an exact unapproved candidate match as a new-variant', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/ExistingButton.tsx': `
+      export function ExistingButton() {
+        return <button className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white">Save</button>;
+      }
+    `,
+  });
+  const designSystemDir = await makeCandidateOnlyDesignSystem(fixtureDir);
+  let stdout = '';
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir], {
+    stdout: { write: (message) => { stdout += message; } },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout, /no design-system drift found/);
+  assert.doesNotMatch(stdout, /new-variant/);
+});
+
+test('check reports near-miss instead of new-variant for the same usage', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />;
+      }
+    `,
+  });
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  await writeCatalogCandidates(designSystemDir, [
+    candidateFixture('candidate-variant-input', 'FormField', 'input', [
+      'block',
+      'w-full',
+      'rounded-md',
+      'border',
+      'border-neutral-300',
+      'px-3',
+      'py-2',
+      'text-sm',
+      'shadow-sm',
+      'focus:border-blue-500',
+      'focus:ring-blue-500',
+      'disabled:opacity-50',
+    ]),
+  ]);
+  let stdout = '';
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir], {
+    stdout: { write: (message) => { stdout += message; } },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout, /near-miss FormInput/);
+  assert.doesNotMatch(stdout, /new-variant/);
+});
+
+test('check --base scans only files changed since the git ref plus uncommitted changes', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Changed.tsx': `
+      export function Changed() {
+        return <button className="text-sm">Save</button>;
+      }
+    `,
+    'src/Unchanged.tsx': `
+      export function Unchanged() {
+        return <button className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-indigo-600 text-white shadow-sm">Skip</button>;
+      }
+    `,
+  });
+  const designSystemDir = await makeCandidateOnlyDesignSystem(fixtureDir);
+  assertGit(fixtureDir, ['init']);
+  assertGit(fixtureDir, ['config', 'user.email', 'test@example.com']);
+  assertGit(fixtureDir, ['config', 'user.name', 'Test User']);
+  assertGit(fixtureDir, ['add', '.']);
+  assertGit(fixtureDir, ['commit', '-m', 'baseline']);
+  await fs.writeFile(path.join(fixtureDir, 'src/Changed.tsx'), `
+    export function Changed() {
+      return <button className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-indigo-600 text-white shadow-sm">Save</button>;
+    }
+  `, 'utf8');
+  let stdout = '';
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir, '--base', 'HEAD'], {
+    stdout: { write: (message) => { stdout += message; } },
+    stderr: { write: () => {} },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout, /src\/Changed\.tsx:3/);
+  assert.doesNotMatch(stdout, /src\/Unchanged\.tsx/);
 });
 
 test('mcp stdio server lists, looks up, and checks approved assets', async () => {
@@ -1169,6 +1284,8 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     'design-system',
     '--files',
     'src/**/*.tsx,components/*.tsx',
+    '--base',
+    'origin/main',
     '--strict',
     '--report',
     'report.md',
@@ -1177,6 +1294,7 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     target: 'repo',
     designSystem: 'design-system',
     files: 'src/**/*.tsx,components/*.tsx',
+    base: 'origin/main',
     strict: true,
     report: 'report.md',
   });
@@ -1269,6 +1387,104 @@ async function runMcpSession(designSystemDir, requests) {
 function parseToolText(response) {
   assert.equal(response.result.content[0].type, 'text');
   return JSON.parse(response.result.content[0].text);
+}
+
+async function makeCandidateOnlyDesignSystem(root) {
+  const designSystemDir = path.join(root, 'design-system');
+  await fs.mkdir(designSystemDir, { recursive: true });
+  await fs.writeFile(path.join(designSystemDir, 'assets.json'), '[]\n', 'utf8');
+  await fs.writeFile(path.join(designSystemDir, 'decisions.json'), '[]\n', 'utf8');
+  await writeCatalogCandidates(designSystemDir, [
+    candidateFixture('candidate-button-001', 'Button', 'button', [
+      'inline-flex',
+      'items-center',
+      'justify-center',
+      'rounded-md',
+      'px-4',
+      'py-2',
+      'text-sm',
+      'font-medium',
+      'bg-blue-600',
+      'text-white',
+    ]),
+    candidateFixture('candidate-button-002', 'Button', 'button', [
+      'inline-flex',
+      'items-center',
+      'justify-center',
+      'rounded-md',
+      'px-4',
+      'py-2',
+      'text-sm',
+      'font-medium',
+      'bg-slate-900',
+      'text-white',
+    ]),
+    candidateFixture('candidate-button-003', 'Button', 'button', [
+      'inline-flex',
+      'items-center',
+      'justify-center',
+      'rounded-md',
+      'px-3',
+      'py-1.5',
+      'text-sm',
+      'font-medium',
+      'border',
+      'border-neutral-300',
+    ]),
+    candidateFixture('candidate-button-004', 'Button', 'button', [
+      'inline-flex',
+      'items-center',
+      'justify-center',
+      'rounded-md',
+      'px-4',
+      'py-2',
+      'text-sm',
+      'font-medium',
+      'bg-white',
+      'text-neutral-900',
+    ]),
+  ]);
+  return designSystemDir;
+}
+
+async function writeCatalogCandidates(designSystemDir, candidates) {
+  await fs.writeFile(path.join(designSystemDir, 'catalog.json'), `${JSON.stringify({
+    summary: {
+      candidates: candidates.length,
+    },
+    candidates,
+  }, null, 2)}\n`, 'utf8');
+}
+
+function candidateFixture(id, role, element, commonClasses) {
+  return {
+    id,
+    role,
+    status: 'needs-decision',
+    source: {
+      occurrences: 2,
+      files: 1,
+      examples: [
+        {
+          file: `src/${id}.tsx`,
+          line: 1,
+          column: 1,
+          element,
+          sourceType: 'className',
+        },
+      ],
+    },
+    commonClasses,
+    variantClasses: [],
+  };
+}
+
+function assertGit(cwd, args) {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
 }
 
 async function makeDesignSystemArtifacts(root) {

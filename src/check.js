@@ -1,17 +1,24 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { buildApprovedAssets } from './assets.js';
 import { analyzeSource } from './extractor.js';
 import { findJsxFiles } from './scanner.js';
 
 const SIMILARITY_THRESHOLD = 0.6;
+const NEW_VARIANT_MIN_SIMILARITY = 0.5;
+const NEW_VARIANT_MAX_SIMILARITY = 0.95;
+const execFileAsync = promisify(execFile);
 
 export async function runDesignSystemCheck(options) {
   const repoDir = path.resolve(options.repoPath);
   const artifactsDir = path.resolve(options.designSystem);
   const approvedAssets = await loadApprovedAssets(artifactsDir);
-  const usages = await scanUsages(repoDir, options.files);
-  const violations = findViolations(usages, approvedAssets);
+  const candidates = await loadCatalogCandidates(artifactsDir);
+  const baseFiles = options.base ? await resolveBaseChangedFiles(repoDir, options.base, options.stderr) : null;
+  const usages = await scanUsages(repoDir, options.files, baseFiles);
+  const violations = findViolations(usages, approvedAssets, candidates);
   const text = formatTextReport(violations);
 
   if (options.report) {
@@ -27,7 +34,7 @@ export async function runDesignSystemCheck(options) {
   };
 }
 
-export function findViolations(usages, assets) {
+export function findViolations(usages, assets, candidates = []) {
   const approved = assets
     .map((asset) => ({
       asset,
@@ -35,16 +42,30 @@ export function findViolations(usages, assets) {
       deprecatedSignatures: deprecatedClassSets(asset.deprecatedClasses),
     }))
     .filter((entry) => entry.signature.size > 0 || entry.deprecatedSignatures.length > 0);
+  const candidateEntries = candidates
+    .map((candidate) => ({
+      candidate,
+      role: candidateRole(candidate),
+      signature: normalizedClassSet(candidate.commonClasses),
+    }))
+    .filter((entry) => entry.signature.size > 0);
+  const roleCounts = countCandidatesByRole(candidateEntries);
   const violations = [];
 
   for (const usage of usages) {
     const usageSet = normalizedClassSet(usage.classes);
+    let deprecatedMatch = null;
+    let nearMissMatch = null;
+    let hasExactApprovedMatch = false;
 
     for (const entry of approved) {
       for (const deprecatedSignature of entry.deprecatedSignatures) {
         const similarity = jaccard(usageSet, deprecatedSignature);
         if (similarity >= SIMILARITY_THRESHOLD) {
-          violations.push(buildViolation('deprecated', usage, entry.asset, deprecatedSignature, similarity));
+          const violation = buildViolation('deprecated', usage, entry.asset, deprecatedSignature, similarity);
+          if (!deprecatedMatch || similarity > deprecatedMatch.similarity) {
+            deprecatedMatch = violation;
+          }
         }
       }
 
@@ -53,9 +74,31 @@ export function findViolations(usages, assets) {
       }
 
       const similarity = jaccard(usageSet, entry.signature);
-      if (similarity >= SIMILARITY_THRESHOLD && similarity < 1) {
-        violations.push(buildViolation('near-miss', usage, entry.asset, entry.signature, similarity));
+      if (similarity === 1) {
+        hasExactApprovedMatch = true;
+        continue;
       }
+      if (similarity >= SIMILARITY_THRESHOLD && similarity < 1) {
+        const violation = buildViolation('near-miss', usage, entry.asset, entry.signature, similarity);
+        if (!nearMissMatch || similarity > nearMissMatch.similarity) {
+          nearMissMatch = violation;
+        }
+      }
+    }
+
+    const existingMatch = bestExistingViolation(deprecatedMatch, nearMissMatch);
+    if (existingMatch) {
+      violations.push(existingMatch);
+      continue;
+    }
+
+    if (hasExactApprovedMatch) {
+      continue;
+    }
+
+    const newVariantMatch = findNewVariantMatch(usage, usageSet, candidateEntries, roleCounts);
+    if (newVariantMatch) {
+      violations.push(newVariantMatch);
     }
   }
 
@@ -93,6 +136,13 @@ export function formatMarkdownReport(violations) {
   }
 
   lines.push(`Found ${violations.length} design-system drift warning${violations.length === 1 ? '' : 's'}.`, '');
+  lines.push('### Summary', '');
+  lines.push('| Type | Count |');
+  lines.push('| --- | ---: |');
+  for (const [type, count] of violationCounts(violations)) {
+    lines.push(`| ${escapeMarkdown(type)} | ${count} |`);
+  }
+  lines.push('');
   lines.push('| Location | Type | Asset | Diff |');
   lines.push('| --- | --- | --- | --- |');
 
@@ -121,6 +171,11 @@ export async function loadApprovedAssets(artifactsDir) {
   }
 
   return Array.isArray(assets) ? assets : [];
+}
+
+export async function loadCatalogCandidates(artifactsDir) {
+  const catalog = await readJson(path.join(artifactsDir, 'catalog.json'), null);
+  return Array.isArray(catalog?.candidates) ? catalog.candidates : [];
 }
 
 export function checkClassesAgainstAssets(classes, assets) {
@@ -192,10 +247,10 @@ function buildClassCheckResult(verdict, usage, asset, referenceSet, similarity) 
   };
 }
 
-async function scanUsages(repoDir, filesOption) {
+async function scanUsages(repoDir, filesOption, baseFiles = null) {
   const relativeFiles = filesOption
-    ? await resolveRequestedFiles(repoDir, filesOption)
-    : await findJsxFiles(repoDir);
+    ? await resolveRequestedFiles(repoDir, filesOption, baseFiles)
+    : baseFiles ?? await findJsxFiles(repoDir);
   const usages = [];
 
   for (const relativeFile of relativeFiles) {
@@ -219,12 +274,12 @@ async function scanUsages(repoDir, filesOption) {
   return usages;
 }
 
-async function resolveRequestedFiles(repoDir, filesOption) {
+async function resolveRequestedFiles(repoDir, filesOption, availableFiles = null) {
   const patterns = filesOption
     .split(',')
     .map((pattern) => pattern.trim())
     .filter(Boolean);
-  const allFiles = await findJsxFiles(repoDir);
+  const allFiles = availableFiles ?? await findJsxFiles(repoDir);
   const selected = new Set();
 
   for (const pattern of patterns) {
@@ -245,6 +300,78 @@ async function resolveRequestedFiles(repoDir, filesOption) {
   return [...selected].sort();
 }
 
+async function resolveBaseChangedFiles(repoDir, baseRef, stderr = process.stderr) {
+  try {
+    await git(repoDir, ['rev-parse', '--is-inside-work-tree']);
+    const outputs = await Promise.all([
+      git(repoDir, ['diff', '--name-only', `${baseRef}...HEAD`]),
+      git(repoDir, ['diff', '--name-only']),
+      git(repoDir, ['diff', '--name-only', '--cached']),
+      git(repoDir, ['ls-files', '--others', '--exclude-standard']),
+    ]);
+    const changed = uniqueSorted(outputs.flatMap(parseGitFiles).map(normalizePath));
+    const jsxFiles = new Set(await findJsxFiles(repoDir));
+    return changed.filter((file) => jsxFiles.has(file));
+  } catch (error) {
+    stderr?.write?.(`dsg check: could not resolve --base ${baseRef}: ${error.message}. Falling back to full scan.\n`);
+    return null;
+  }
+}
+
+async function git(repoDir, args) {
+  const { stdout } = await execFileAsync('git', ['-C', repoDir, ...args], {
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+  });
+  return stdout;
+}
+
+function parseGitFiles(output) {
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function findNewVariantMatch(usage, usageSet, candidateEntries, roleCounts) {
+  let bestMatch = null;
+  let hasExactCandidateMatch = false;
+
+  for (const entry of candidateEntries) {
+    const similarity = jaccard(usageSet, entry.signature);
+    if (similarity === 1) {
+      hasExactCandidateMatch = true;
+      continue;
+    }
+    if (
+      similarity >= NEW_VARIANT_MIN_SIMILARITY
+      && similarity <= NEW_VARIANT_MAX_SIMILARITY
+      && (!bestMatch || similarity > bestMatch.similarity)
+    ) {
+      bestMatch = { ...entry, similarity };
+    }
+  }
+
+  if (hasExactCandidateMatch || !bestMatch) {
+    return null;
+  }
+
+  const existingVariants = roleCounts.get(bestMatch.role) ?? 0;
+  return buildNewVariantViolation(usage, bestMatch.candidate, bestMatch.signature, bestMatch.similarity, bestMatch.role, existingVariants + 1);
+}
+
+function bestExistingViolation(deprecatedMatch, nearMissMatch) {
+  if (!deprecatedMatch) {
+    return nearMissMatch;
+  }
+
+  if (!nearMissMatch) {
+    return deprecatedMatch;
+  }
+
+  return nearMissMatch.similarity >= deprecatedMatch.similarity ? nearMissMatch : deprecatedMatch;
+}
+
 function buildViolation(type, usage, asset, referenceSet, similarity) {
   const usageSet = normalizedClassSet(usage.classes);
   return {
@@ -259,6 +386,54 @@ function buildViolation(type, usage, asset, referenceSet, similarity) {
     missingClasses: difference(referenceSet, usageSet),
     extraClasses: difference(usageSet, referenceSet),
   };
+}
+
+function buildNewVariantViolation(usage, candidate, referenceSet, similarity, role, nextVariantNumber) {
+  const usageSet = normalizedClassSet(usage.classes);
+  return {
+    type: 'new-variant',
+    file: usage.file,
+    line: usage.line,
+    column: usage.column,
+    element: usage.element,
+    assetName: role,
+    assetId: candidate.id,
+    similarity,
+    missingClasses: difference(referenceSet, usageSet),
+    extraClasses: difference(usageSet, referenceSet),
+    role,
+    nextVariantNumber,
+  };
+}
+
+function candidateRole(candidate) {
+  if (typeof candidate.role === 'string' && candidate.role.trim()) {
+    return candidate.role.trim();
+  }
+
+  const example = candidate.source?.examples?.find((item) => typeof item.element === 'string' && item.element.trim());
+  if (example) {
+    return example.element.trim();
+  }
+
+  const elementTag = candidate.elementTags?.find((item) => typeof item === 'string' && item.trim());
+  return elementTag?.trim() || 'UI pattern';
+}
+
+function countCandidatesByRole(candidateEntries) {
+  const counts = new Map();
+  for (const entry of candidateEntries) {
+    counts.set(entry.role, (counts.get(entry.role) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function violationCounts(violations) {
+  const counts = new Map();
+  for (const violation of violations) {
+    counts.set(violation.type, (counts.get(violation.type) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right));
 }
 
 function deprecatedClassSets(value) {
@@ -326,6 +501,10 @@ function messageFor(violation) {
     return `${violation.assetName} の deprecated class に近い使用です。承認済み asset に合わせてください。`;
   }
 
+  if (violation.type === 'new-variant') {
+    return `既存パターンの新しい変種を発明しています。これは ${violation.role} の ${violation.nextVariantNumber} つ目の変種になります。`;
+  }
+
   return `${violation.assetName} にほぼ一致。合わせるか、意図的な差分なら decisions に記録せよ。`;
 }
 
@@ -371,6 +550,10 @@ function globToRegExp(pattern) {
 
 function normalizePath(filePath) {
   return filePath.split(path.sep).join('/');
+}
+
+function uniqueSorted(values) {
+  return [...new Set(values)].sort();
 }
 
 function escapeRegExp(value) {
