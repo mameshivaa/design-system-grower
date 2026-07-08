@@ -63,6 +63,7 @@ export async function main(argv = process.argv.slice(2), streams = process) {
       base: options.base,
       strict: options.strict,
       report: options.report,
+      blame: options.blame,
       stderr: streams.stderr,
     });
     streams.stdout.write(result.text);
@@ -192,6 +193,11 @@ export function parseArgs(argv) {
 
     if (arg === '--strict') {
       options.strict = true;
+      continue;
+    }
+
+    if (arg === '--blame') {
+      options.blame = true;
       continue;
     }
 
@@ -390,7 +396,7 @@ export function helpText() {
     '  design-system-grower scan [target-dir] --out catalog.json',
     '  design-system-grower instruct [design-system-dir]',
     '  design-system-grower decide [design-system-dir] <candidate-id> <action> [--name AssetName] [--side 1]',
-    '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--base <git-ref>] [--strict] [--report out.md]',
+    '  design-system-grower check <repo-path> --design-system <artifacts-dir> [--files <glob,glob>] [--base <git-ref>] [--strict] [--blame] [--report out.md]',
     '  design-system-grower hook-check --design-system <artifacts-dir>',
     '  design-system-grower install-hooks [--design-system <artifacts-dir>] [--settings .claude/settings.json] [--force]',
     '  design-system-grower mcp --design-system <artifacts-dir>',
@@ -414,6 +420,7 @@ export function helpText() {
     '  --files <glob,glob>        Limit check to comma-separated files or simple globs',
     '  --base <git-ref>           Limit check to files changed since git ref plus uncommitted changes',
     '  --strict                   Exit 1 from check when drift is found',
+    '  --blame                    Annotate check findings with git blame attribution',
     '  --report <path>            Write a markdown check report',
     '  --settings <path>          Claude Code settings path (install-hooks)',
     '  --name <AssetName>         Name the approved asset when using decide',

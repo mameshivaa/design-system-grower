@@ -1133,6 +1133,116 @@ test('check writes a markdown report', async () => {
   assert.match(report, /focus:ring-red-500/);
 });
 
+test('check --blame reports claude attribution from git blame', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />;
+      }
+    `,
+  });
+  assertGit(fixtureDir, ['init']);
+  assertGit(fixtureDir, ['config', 'user.email', 'committer@example.com']);
+  assertGit(fixtureDir, ['config', 'user.name', 'Committer']);
+  assertGit(fixtureDir, ['add', 'src/Form.tsx']);
+  assertGit(fixtureDir, ['commit', '-m', 'add claude variant'], {
+    GIT_AUTHOR_NAME: 'Claude',
+    GIT_AUTHOR_EMAIL: 'noreply@anthropic.com',
+    GIT_AUTHOR_DATE: '2026-07-06T00:00:00Z',
+    GIT_COMMITTER_DATE: '2026-07-06T00:00:00Z',
+  });
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  const reportPath = path.join(fixtureDir, 'dsg-check.md');
+  let stdout = '';
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir, '--blame', '--report', reportPath], {
+    stdout: { write: (message) => { stdout += message; } },
+  });
+  const report = await fs.readFile(reportPath, 'utf8');
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout, /near-miss FormInput/);
+  assert.match(stdout, /introduced by: claude \(/);
+  assert.match(report, /\| Location \| Type \| Asset \| Introduced By \| Diff \|/);
+  assert.match(report, /\| claude \(/);
+});
+
+test('check --blame reports human attribution for human authors', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />;
+      }
+    `,
+  });
+  assertGit(fixtureDir, ['init']);
+  assertGit(fixtureDir, ['config', 'user.email', 'human@example.com']);
+  assertGit(fixtureDir, ['config', 'user.name', 'Human Author']);
+  assertGit(fixtureDir, ['add', 'src/Form.tsx']);
+  assertGit(fixtureDir, ['commit', '-m', 'add human variant']);
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  let stdout = '';
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir, '--blame'], {
+    stdout: { write: (message) => { stdout += message; } },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout, /introduced by: human \(/);
+});
+
+test('check --blame omits attribution for untracked files', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />;
+      }
+    `,
+  });
+  assertGit(fixtureDir, ['init']);
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  let stdout = '';
+
+  const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir, '--blame'], {
+    stdout: { write: (message) => { stdout += message; } },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout, /near-miss FormInput/);
+  assert.doesNotMatch(stdout, /introduced by:/);
+});
+
+test('check without --blame does not invoke git blame', async () => {
+  const fixtureDir = await makeFixtureRepo({
+    'src/Form.tsx': `
+      export function Form() {
+        return <input className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-red-500" />;
+      }
+    `,
+  });
+  const binDir = path.join(fixtureDir, 'bin');
+  const fakeGitPath = path.join(binDir, 'git');
+  await fs.mkdir(binDir, { recursive: true });
+  await fs.writeFile(fakeGitPath, '#!/bin/sh\nexit 99\n', 'utf8');
+  await fs.chmod(fakeGitPath, 0o755);
+  const designSystemDir = await makeDesignSystemArtifacts(fixtureDir);
+  const previousPath = process.env.PATH;
+  let stdout = '';
+
+  try {
+    process.env.PATH = `${binDir}${path.delimiter}${previousPath}`;
+    const exitCode = await main(['check', fixtureDir, '--design-system', designSystemDir], {
+      stdout: { write: (message) => { stdout += message; } },
+    });
+
+    assert.equal(exitCode, 0);
+    assert.match(stdout, /near-miss FormInput/);
+    assert.doesNotMatch(stdout, /introduced by:/);
+  } finally {
+    process.env.PATH = previousPath;
+  }
+});
+
 test('check reports a new-variant from unapproved catalog candidates', async () => {
   const fixtureDir = await makeFixtureRepo({
     'src/NewButton.tsx': `
@@ -1477,6 +1587,7 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     '--base',
     'origin/main',
     '--strict',
+    '--blame',
     '--report',
     'report.md',
   ]), {
@@ -1486,6 +1597,7 @@ test('parseArgs rejects invalid options before running the scanner', () => {
     files: 'src/**/*.tsx,components/*.tsx',
     base: 'origin/main',
     strict: true,
+    blame: true,
     report: 'report.md',
   });
   assert.deepEqual(parseArgs([
@@ -1691,10 +1803,11 @@ function candidateFixture(id, role, element, commonClasses) {
   };
 }
 
-function assertGit(cwd, args) {
+function assertGit(cwd, args, env = {}) {
   const result = spawnSync('git', args, {
     cwd,
     encoding: 'utf8',
+    env: { ...process.env, ...env },
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 }
