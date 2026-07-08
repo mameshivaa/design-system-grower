@@ -8,7 +8,7 @@
     "dsg": "./src/cli.mjs"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js"
   },
   "keywords": [
     "design-system",
