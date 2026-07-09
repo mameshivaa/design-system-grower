@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.0.0 (2026-07-09)
+
+First complete release. The full loop is implemented and verified end-to-end on
+real repositories:
+
+**discover → decide → package → distribute → enforce**
+
+- discover: scan with distinctiveness-gated candidates (precision@10 ≈ 8/10 on
+  real repos), role taxonomy, drift (competing color families), diagnosis grade
+- decide: local promotion board, `decide` (incl. `canonicalize --side`)
+- package: `extract` — lift, don't synthesize; provenance; class-equivalence
+  self-check; props-safe output
+- distribute: `registry` — shadcn-compatible; installed into a separate project
+  via `npx shadcn add` in verification
+- enforce: `check` (near-miss / deprecated / new-variant, `--base`, `--blame`),
+  agent rules, MCP server, Claude Code PostToolUse hooks (verified against a
+  live agent)
+
+Also in 1.0: `docs/limitations.md` — an honest inventory of what the heuristics
+do not cover, and the evidence base behind the numbers.
+
 ## v0.6.0 (2026-07-09)
 
 Theme: package your work, then distribute it (lift, don't synthesize).

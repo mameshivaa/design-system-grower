@@ -124,6 +124,25 @@ Observe before mutate:
 - `AGENTS.md` / `CLAUDE.md` are only written on explicit command, and existing files are never overwritten without `--force`;
 - the review server binds to localhost only.
 
+## Command reference
+
+| Command | What it does |
+|---|---|
+| `dsg init [dir]` | Scan + diagnosis + review board + next steps, in one command |
+| `dsg scan [dir] --out <catalog.json>` | Scan and write all artifacts (read-only on your code) |
+| `dsg review [ds-dir]` | Serve the promotion board locally (approve from the browser) |
+| `dsg decide [ds-dir] <candidate> <action> [--name N] [--side N]` | Approve reuse / promote-variant / wrap / canonicalize … |
+| `dsg extract [ds-dir] <asset> --out <dir>` | Lift the approved pattern's real source into a component (with provenance) |
+| `dsg registry [ds-dir] --components <dir> --out <dir>` | Package provenanced components as a shadcn-compatible registry |
+| `dsg check <repo> --design-system <dir> [--base ref] [--blame] [--strict]` | Report near-miss / deprecated / new-variant drift |
+| `dsg install-instructions [ds-dir]` | Write agent rules into AGENTS.md / CLAUDE.md |
+| `dsg mcp --design-system <dir>` | MCP server: lookup_pattern / check_classes / list_assets |
+| `dsg install-hooks` | Claude Code PostToolUse hook — drift comes back as blocking agent feedback |
+| `dsg diagnose [ds-dir]` | Regenerate the shareable diagnosis (UI Chaos Grade) |
+| `dsg instruct [ds-dir]` | Regenerate agent rules after editing decisions.json |
+
+Honest scope notes: [docs/limitations.md](docs/limitations.md).
+
 ## Docs
 
 - [Product direction & north-star metric](docs/direction.md)
