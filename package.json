@@ -39,6 +39,7 @@
     "docs/vision.md",
     "README.md",
     "LICENSE",
-    "CONTRIBUTING.md"
+    "CONTRIBUTING.md",
+    "docs/limitations.md"
   ]
 }
